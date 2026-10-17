@@ -20,6 +20,15 @@
 <body>
   <iframe src="/app.html" allow="camera; microphone; clipboard-write; fullscreen" title="Whisper"></iframe>
   <script>
+    // Fix: the app uses 100vh, which pushes the bottom menu off screen inside the iPhone safe areas.
+    document.querySelector('iframe').addEventListener('load', function () {
+      try {
+        var d = this.contentDocument;
+        var s = d.createElement('style');
+        s.textContent = '.h-screen{height:100%!important}.w-screen{width:100%!important}.min-h-screen{min-height:100%!important}';
+        d.head.appendChild(s);
+      } catch (e) {}
+    });
     if ('serviceWorker' in navigator) addEventListener('load', function () { navigator.serviceWorker.register('/sw.js'); });
   </script>
 </body>
