@@ -1,174 +1,400 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Whisper</title>
-<style>
-*{box-sizing:border-box}
-html,body{margin:0;height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif}
-#app{height:100%;overflow-y:auto;padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 90px)}
-.w{max-width:520px;margin:0 auto}
-input{width:100%;background:#000;border:1px solid #27272a;border-radius:12px;color:#fff;padding:12px;font-size:16px;margin:6px 0 12px}
-input:focus{outline:0;border-color:#fff}
-button{background:#fff;color:#000;border:0;border-radius:12px;padding:12px 16px;font-weight:700;font-size:14px}
-button.g{background:#18181b;color:#fff;border:1px solid #27272a}
-.card{background:#0a0a0a;border:1px solid #27272a;border-radius:16px;padding:14px;margin:12px 0}
-.m{font-family:ui-monospace,Menlo,monospace}.s{color:#a1a1aa;font-size:12px}
-.row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
-#toast{position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:12px;right:12px;background:#fff;color:#000;padding:12px;border-radius:14px;display:none;font-size:13px;font-weight:600;z-index:9}
-.av{width:42px;height:42px;border-radius:50%;background:#fff;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.bd{background:#fff;color:#000;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:4px}
-.bub{max-width:80%;margin:3px 0;padding:8px 12px;border-radius:16px;background:#121212;border:1px solid #27272a;font-size:15px;white-space:pre-wrap;word-break:break-word}
-.bub.me{background:#fff;color:#000;border-color:#fff}
-.inp{position:sticky;bottom:calc(env(safe-area-inset-bottom) + 58px);background:#000;padding:8px 0;display:flex;gap:8px}
-nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#050505;border-top:1px solid #18181b;padding-bottom:env(safe-area-inset-bottom)}
-nav button{flex:1;background:none;color:#a1a1aa;border-radius:0;padding:16px 4px;border-top:2px solid transparent}
-nav button.on{color:#fff;border-top-color:#fff}
-h2{margin:8px 0}
-</style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="/chat.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Whisper</title>
+  <meta name="theme-color" content="#000000" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script type="importmap">
+    { "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0" } }
+  </script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="/chat.js"></script>
+  <style>
+    html, body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #000; color: #fff; margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+    #root { height: 100%; width: 100%; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); background-color: #000; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #050505; }
+    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 9999px; }
+    input { font-size: 16px; }
+  </style>
 </head>
-<body>
-<div id="app"></div><div id="toast"></div>
-<script>
-const SB_URL = 'https://bbpbeigvfrdshcyydwru.supabase.co';
-const SB_KEY = 'sb_publishable_L1joup6cLTwCnb6M4Zxlrg_W7nSJBdi';
-const sb = supabase.createClient(SB_URL, SB_KEY);
-const $ = s => document.querySelector(s), app = $('#app');
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const toast = m => { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3500); };
-const emailOf = c => c.trim().toLowerCase() + '@whisper.local';
-let me = null, timer = null;
+<body class="bg-black text-white select-none">
+  <div id="root"></div>
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { Lock, KeyRound, Eye, EyeOff, ArrowRight, ShieldAlert, Send, ChevronLeft, CheckCheck, Search, Users, Settings, LogOut, Sliders, MessageSquare, MessageSquarePlus, UserPlus2 } from 'lucide-react';
 
-async function loadMe() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return null;
-  const { data } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-  return data;
-}
-async function api(body) {
-  const { data: { session } } = await sb.auth.getSession();
-  const r = await fetch(SB_URL + '/functions/v1/admin', { method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: 'Bearer ' + session.access_token }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || 'Request failed');
-  return j;
-}
+    const SB_URL = 'https://bbpbeigvfrdshcyydwru.supabase.co';
+    const SB_KEY = 'sb_publishable_L1joup6cLTwCnb6M4Zxlrg_W7nSJBdi';
+    const sb = supabase.createClient(SB_URL, SB_KEY);
+    const fmt = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-function loginView(err) {
-  clearInterval(timer); if (window.WhisperChat) WhisperChat.stop();
-  app.innerHTML = `<div class="w" style="padding-top:8vh;text-align:center">
-    <img src="/icons/icon-192.png" width="84" height="84" style="border-radius:18px">
-    <h1 style="margin:14px 0 4px">Welcome to Whisper</h1>
-    <div class="s" style="margin-bottom:22px">Private, invite-only messenger. Sign in with the Whisper-Code and password from your Admin.</div>
-    ${err ? `<div class="card" style="text-align:left;font-size:13px">${esc(err)}</div>` : ''}
-    <form id="f" style="text-align:left"><label class="s">Your Whisper-Code</label>
-    <input id="c" class="m" placeholder="WSP-0000-NAME" autocapitalize="characters" autocomplete="username" required>
-    <label class="s">Password</label><input id="p" type="password" autocomplete="current-password" required>
-    <button style="width:100%;padding:14px">Sign In</button></form></div>`;
-  $('#f').onsubmit = async e => {
-    e.preventDefault();
-    const { error } = await sb.auth.signInWithPassword({ email: emailOf($('#c').value), password: $('#p').value });
-    if (error) return loginView('Invalid Whisper-Code or password, or access has been stopped.');
-    boot();
-  };
-}
+    const WhisperLogo = ({ className = "w-10 h-10" }) => (
+      <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+        <rect width="200" height="200" rx="36" fill="#000000" />
+        <g transform="translate(34, 34) scale(0.66)">
+          <rect x="6" y="6" width="188" height="188" rx="22" fill="#FFFFFF" />
+          <rect x="20" y="20" width="160" height="160" fill="#000000" />
+          <path d="M 32 32 H 136 C 123 64 118 92 118 100 C 118 112 123 138 136 168 H 32 V 115 C 62 115 88 104 98 84 C 82 76 58 74 32 79 V 32 Z" fill="#FFFFFF" />
+          <path d="M 28 91 C 50 83 74 84 89 90 C 77 104 54 109 28 107 Z" fill="#FFFFFF" />
+          <path d="M 28 87 C 52 78 78 80 95 88 C 82 106 56 113 28 111" stroke="#000000" strokeWidth="6.5" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="62" cy="94" r="11.5" fill="#000000" />
+          <circle cx="139" cy="101" r="37" fill="#000000" />
+          <circle cx="137" cy="101" r="29" fill="#FFFFFF" />
+          <path d="M 122 105 C 123 89 135 82 149 83" stroke="#000000" strokeWidth="8" strokeLinecap="square" />
+          <path d="M 134 90 C 141 96 144 104 143 114" stroke="#000000" strokeWidth="8" strokeLinecap="square" />
+        </g>
+      </svg>
+    );
 
-async function boot() {
-  me = await loadMe();
-  if (!me) { await sb.auth.signOut(); return loginView(); }
-  if (me.status !== 'active') { await sb.auth.signOut(); return loginView('This Whisper-Code has been stopped by the Administrator.'); }
-  mainView();
-  clearInterval(timer);
-  timer = setInterval(async () => {
-    const m = await loadMe();
-    if (!m || m.status !== 'active') { await sb.auth.signOut(); loginView('Your access was stopped by the Administrator.'); }
-  }, 30000);
-}
+    function App() {
+      const [phase, setPhase] = useState('loading');
+      const [me, setMe] = useState(null);
+      const [loginCode, setLoginCode] = useState('');
+      const [loginPassword, setLoginPassword] = useState('');
+      const [showLoginPassword, setShowLoginPassword] = useState(false);
+      const [loginError, setLoginError] = useState('');
+      const [activeTab, setActiveTab] = useState('chats');
+      const [openId, setOpenId] = useState(null);
+      const [mobileShowChat, setMobileShowChat] = useState(false);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [inputText, setInputText] = useState('');
+      const [toastMessage, setToastMessage] = useState(null);
+      const [showAdd, setShowAdd] = useState(false);
+      const [addCode, setAddCode] = useState('');
+      const [accountSubView, setAccountSubView] = useState('main');
+      const [editAlias, setEditAlias] = useState('');
+      const [editBio, setEditBio] = useState('');
+      const [newPass, setNewPass] = useState('');
+      const [, setTick] = useState(0);
+      const endRef = useRef(null);
 
-let tab = 'chats';
-function goTab(t) {
-  tab = t;
-  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-  const el = $('#tab'); el.onclick = null;
-  if (t === 'chats' || t === 'contacts') WhisperChat.show(t, el);
-  else { WhisperChat.hide(); t === 'admin' ? adminTab(el) : accountTab(el); }
-}
-window.goTab = goTab;
-async function mainView() {
-  const tabs = [['chats', 'Chats'], ['contacts', 'Clients'], ...(me.role === 'admin' ? [['admin', 'Admin']] : []), ['account', 'Account']];
-  app.innerHTML = `<div class="w"><div id="tab"></div></div><nav id="nav">${tabs.map(([k, l]) => `<button data-t="${k}">${l}${k === 'chats' ? '<span class="bd" id="bc" style="display:none"></span>' : ''}</button>`).join('')}</nav>`;
-  $('#nav').onclick = e => { const b = e.target.closest('button'); if (b) goTab(b.dataset.t); };
-  goTab('account'); goTab('chats');
-  try {
-    await WhisperChat.start(sb, me, n => { const b = $('#bc'); if (b) { b.textContent = n; b.style.display = n ? 'inline-block' : 'none'; } });
-  } catch (x) { toast('Secure chat could not start: ' + (x.message || x)); }
-}
+      const triggerToast = (msg) => { setToastMessage(msg); setTimeout(() => setToastMessage((p) => (p === msg ? null : p)), 3500); };
+      const { contacts, msgs } = WhisperChat.getState();
 
-function accountTab(el) {
-  el.innerHTML = `<h2>Account</h2><div class="card"><div class="s m">${esc(me.whisper_code)}</div>
-    <label class="s">Display name</label><input id="al" value="${esc(me.alias)}" maxlength="60">
-    <label class="s">Bio</label><input id="bi" value="${esc(me.bio)}" maxlength="120">
-    <label class="s">New password (leave empty to keep current)</label><input id="pw" type="password" autocomplete="new-password">
-    <button id="sv" style="width:100%">Save changes</button></div>
-    <button class="g" id="out" style="width:100%">Sign out</button>`;
-  $('#sv').onclick = async () => {
-    const pw = $('#pw').value;
-    if (pw && pw.length < 8) return toast('Password must be at least 8 characters.');
-    const { error } = await sb.from('profiles').update({ alias: $('#al').value.trim() || me.alias, bio: $('#bi').value.trim() }).eq('id', me.id);
-    if (error) return toast('Could not save.');
-    if (pw) { const r = await sb.auth.updateUser({ password: pw }); if (r.error) return toast(r.error.message); }
-    const m = await loadMe(); if (m) me = m; toast('Saved.');
-  };
-  $('#out').onclick = async () => { WhisperChat.stop(); await sb.auth.signOut(); loginView(); };
-}
+      const enter = async () => {
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) return setPhase('login');
+        const { data: p } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+        if (!p || p.status !== 'active') {
+          await sb.auth.signOut();
+          setLoginError(p ? 'This Whisper-Code has been temporarily stopped by the Administrator.' : '');
+          return setPhase('login');
+        }
+        setMe(p); setEditAlias(p.alias); setEditBio(p.bio || ''); setPhase('app');
+        try { await WhisperChat.start(sb, p, () => {}); } catch (e) { triggerToast('Secure chat could not start.'); }
+      };
+      useEffect(() => { enter(); }, []);
+      useEffect(() => WhisperChat.subscribe(() => setTick((t) => t + 1)), []);
+      useEffect(() => {
+        if (!me) return;
+        const iv = setInterval(async () => {
+          const { data: p } = await sb.from('profiles').select('status').eq('id', me.id).maybeSingle();
+          if (!p || p.status !== 'active') { WhisperChat.stop(); await sb.auth.signOut(); setMe(null); setLoginError('Your access was stopped by the Administrator.'); setPhase('login'); }
+        }, 30000);
+        return () => clearInterval(iv);
+      }, [me]);
 
-function adminTab(el) {
-  el.innerHTML = `<h2>Admin</h2><div class="card"><b>Create new client</b>
-    <label class="s" style="display:block;margin-top:10px">Client full name</label><input id="n" maxlength="60">
-    <label class="s">Bio / note (optional)</label><input id="b" maxlength="120">
-    <button id="mk" style="width:100%">+ Create client</button><div id="cred"></div></div>
-    <div class="card"><b>All clients</b><div id="list" class="s" style="margin-top:8px">Loading...</div></div>`;
-  $('#mk').onclick = async () => {
-    const alias = $('#n').value.trim();
-    if (!alias) return toast('Please enter the client name.');
-    $('#mk').disabled = true;
-    try {
-      const r = await api({ action: 'create', alias, bio: $('#b').value.trim() });
-      const text = `Whisper-Code: ${r.code}\nPassword: ${r.password}`;
-      $('#cred').innerHTML = `<div class="card m" style="font-size:13px;white-space:pre-wrap">${esc(text)}</div>
-        <div class="s">Shown only once. Copy it now and send it to the client.</div>
-        <button class="g" id="cp" style="margin-top:8px">Copy login</button>`;
-      $('#cp').onclick = () => navigator.clipboard.writeText(text).then(() => toast('Copied.'));
-      $('#n').value = ''; $('#b').value = ''; renderClients();
-    } catch (x) { toast(x.message); }
-    $('#mk').disabled = false;
-  };
-  $('#list').onclick = async e => {
-    const b = e.target.closest('button'); if (!b) return;
-    try {
-      if (b.dataset.a === 'del') { if (!confirm('Permanently delete this client?')) return; await api({ action: 'delete', id: b.dataset.id }); toast('Client deleted.'); }
-      else { await api({ action: 'status', id: b.dataset.id, status: b.dataset.a }); toast('Updated.'); }
-      renderClients();
-    } catch (x) { toast(x.message); }
-  };
-  renderClients();
-}
+      const activeContact = contacts.find((c) => c.id === openId) || null;
+      const activeMsgs = msgs.filter((m) => m.peer === openId).sort((a, b) => a.ts - b.ts);
+      useEffect(() => {
+        endRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (openId && activeMsgs.some((m) => m.unread)) WhisperChat.markRead(openId);
+      }, [activeMsgs.length, openId]);
 
-async function renderClients() {
-  const { data, error } = await sb.from('profiles').select('*').order('created_at', { ascending: false });
-  if (error) return $('#list').textContent = 'Could not load clients.';
-  $('#list').innerHTML = data.map(u => `<div class="card row" style="background:#000">
-    <div><b style="color:#fff">${esc(u.alias)}</b> <span class="s">${u.status === 'active' ? 'Active' : 'Paused'}</span>
-    <div class="s m">${esc(u.whisper_code)}</div></div>
-    ${u.role === 'admin' ? '<span class="s">Admin</span>' : `<div class="row">
-      <button class="g" data-id="${u.id}" data-a="${u.status === 'active' ? 'paused' : 'active'}">${u.status === 'active' ? 'Pause' : 'Resume'}</button>
-      <button class="g" data-id="${u.id}" data-a="del">Delete</button></div>`}</div>`).join('');
-}
+      const handleLogin = async (e) => {
+        e.preventDefault(); setLoginError('');
+        const { error } = await sb.auth.signInWithPassword({ email: loginCode.trim().toLowerCase() + '@whisper.local', password: loginPassword });
+        if (error) return setLoginError('Invalid Whisper-Code or password, or access has been stopped.');
+        setLoginCode(''); setLoginPassword(''); setActiveTab('chats'); enter();
+      };
+      const signOut = async () => { WhisperChat.stop(); await sb.auth.signOut(); setMe(null); setOpenId(null); setPhase('login'); };
+      const openChat = (id) => { setOpenId(id); setActiveTab('chats'); setMobileShowChat(true); WhisperChat.markRead(id); };
+      const goTab = (t) => { setActiveTab(t); setMobileShowChat(false); setAccountSubView('main'); };
 
-boot();
-</script>
+      const handleSend = async (e) => {
+        e.preventDefault();
+        const v = inputText.trim(); if (!v || !openId) return;
+        setInputText('');
+        try { await WhisperChat.sendTo(openId, v); } catch (x) { setInputText(v); triggerToast(x.message || 'Could not send.'); }
+      };
+      const handleAdd = async (e) => {
+        e.preventDefault();
+        try { const p = await WhisperChat.addByCode(addCode.trim()); setShowAdd(false); setAddCode(''); openChat(p.id); triggerToast(`Added ${p.alias} to your clients list!`); }
+        catch (x) { triggerToast(x.message); }
+      };
+      const handleSaveProfile = async (e) => {
+        e.preventDefault();
+        if (newPass && newPass.length < 8) return triggerToast('New password must be at least 8 characters.');
+        const nextAlias = editAlias.trim() || me.alias;
+        const { error } = await sb.from('profiles').update({ alias: nextAlias, bio: editBio.trim() }).eq('id', me.id);
+        if (error) return triggerToast('Could not save changes.');
+        if (newPass) { const r = await sb.auth.updateUser({ password: newPass }); if (r.error) return triggerToast(r.error.message); }
+        setMe({ ...me, alias: nextAlias, bio: editBio.trim() }); setNewPass('');
+        triggerToast('Account details successfully updated.'); setAccountSubView('main');
+      };
+
+      if (phase === 'loading') {
+        return <div className="h-full w-full bg-black flex items-center justify-center"><WhisperLogo className="w-20 h-20" /></div>;
+      }
+
+      if (phase === 'login') {
+        return (
+          <div className="h-full w-full overflow-y-auto bg-black text-white flex flex-col justify-between relative font-sans select-none">
+            <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-white/5 blur-[130px] pointer-events-none rounded-full" />
+            <header className="relative z-10 border-b border-zinc-900 bg-black/90 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <WhisperLogo className="w-9 h-9" />
+                <div>
+                  <span className="font-bold tracking-[0.22em] text-sm uppercase text-white block">WHISPER</span>
+                  <span className="text-[10px] text-zinc-400 font-mono">Private Client Messenger</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-mono text-zinc-300 bg-zinc-950 border border-zinc-800 px-3 py-1.5 rounded-full">
+                <Lock className="w-3.5 h-3.5 text-white" /><span>End-to-End Encrypted</span>
+              </div>
+            </header>
+            <main className="relative z-10 flex-1 flex items-center justify-center p-4">
+              <div className="w-full max-w-md bg-[#090909] border border-zinc-800 rounded-3xl shadow-[0_25px_80px_rgba(0,0,0,0.95)] p-7 sm:p-8">
+                <div className="flex flex-col items-center text-center mb-6">
+                  <WhisperLogo className="w-20 h-20 mb-4 shadow-2xl" />
+                  <h1 className="text-2xl font-bold tracking-tight text-white">Welcome to Whisper</h1>
+                  <p className="text-xs text-zinc-400 mt-1.5 max-w-xs leading-relaxed">Private, invite-only messenger. Sign in with the <span className="text-white font-medium">Whisper-Code</span> and password provided by your Admin.</p>
+                </div>
+                {loginError && (
+                  <div className="mb-5 p-3.5 rounded-2xl bg-zinc-950 border border-white/30 flex items-start gap-2.5 text-xs text-zinc-200">
+                    <ShieldAlert className="w-4 h-4 text-white shrink-0 mt-0.5" /><span>{loginError}</span>
+                  </div>
+                )}
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">Your Whisper-Code</label>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input type="text" required value={loginCode} onChange={(e) => setLoginCode(e.target.value)} placeholder="e.g. WSP-8821-VORTEX" autoCapitalize="characters" className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl pl-10 pr-4 py-3 text-sm font-mono tracking-wider text-white placeholder-zinc-600 focus:outline-none transition" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">Password</label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input type={showLoginPassword ? 'text' : 'password'} required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="Enter your password" className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl pl-10 pr-10 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none transition" />
+                      <button type="button" onClick={() => setShowLoginPassword(!showLoginPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white p-1">{showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full mt-2 bg-white hover:bg-zinc-200 text-black font-bold py-3.5 rounded-xl text-sm tracking-wide transition flex items-center justify-center gap-2 cursor-pointer shadow-lg"><span>Sign In to Messenger</span><ArrowRight className="w-4 h-4" /></button>
+                </form>
+              </div>
+            </main>
+            <footer className="relative z-10 border-t border-zinc-900 bg-black px-6 py-3 text-center text-[11px] text-zinc-500">Whisper Private Messenger • End-to-End Encrypted</footer>
+          </div>
+        );
+      }
+
+      const navBtn = (tab, Icon, label) => (
+        <button onClick={() => goTab(tab)} className={`flex flex-col items-center gap-1 p-2.5 rounded-2xl transition cursor-pointer w-16 ${activeTab === tab ? 'bg-white text-black font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}>
+          <Icon className="w-5 h-5" /><span className="text-[10px]">{label}</span>
+        </button>
+      );
+      const convs = contacts
+        .map((c) => ({ c, last: msgs.filter((m) => m.peer === c.id).sort((a, b) => a.ts - b.ts).pop(), unread: msgs.filter((m) => m.peer === c.id && m.unread).length }))
+        .filter((x) => x.last && x.c.alias.toLowerCase().includes(searchQuery.toLowerCase()))
+        .sort((a, b) => b.last.ts - a.last.ts);
+      const shownContacts = contacts.filter((c) => c.alias.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      return (
+        <div className="h-full w-full bg-black text-white flex flex-col md:flex-row overflow-hidden font-sans select-none">
+          {toastMessage && (
+            <div className="fixed left-4 right-4 sm:left-auto sm:max-w-sm z-50 bg-white text-black px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 font-medium text-xs border border-zinc-300" style={{ top: 'calc(env(safe-area-inset-top) + 12px)' }}>
+              <Lock className="w-4 h-4 shrink-0" /><span>{toastMessage}</span>
+            </div>
+          )}
+
+          <nav className="order-2 md:order-1 h-16 md:h-full w-full md:w-20 bg-[#050505] border-t md:border-t-0 md:border-r border-zinc-900 flex md:flex-col items-center justify-around md:justify-between py-2 md:py-5 px-2 z-20 shrink-0">
+            <div className="hidden md:flex flex-col items-center gap-1">
+              <WhisperLogo className="w-11 h-11" />
+              <span className="text-[9px] font-bold tracking-widest uppercase text-zinc-400 mt-1">WHISPER</span>
+            </div>
+            <div className="flex md:flex-col items-center gap-2 md:gap-4 w-full justify-around md:justify-center">
+              {navBtn('chats', MessageSquare, 'Chats')}
+              {navBtn('contacts', Users, 'Clients')}
+              {navBtn('account', Settings, 'Account')}
+              {me.role === 'admin' && (
+                <button onClick={() => { location.href = '/classic.html#admin'; }} className="flex flex-col items-center gap-1 p-2.5 rounded-2xl transition cursor-pointer w-16 text-zinc-400 hover:text-white hover:bg-zinc-900">
+                  <Sliders className="w-5 h-5" /><span className="text-[10px]">Admin</span>
+                </button>
+              )}
+            </div>
+            <div className="hidden md:flex flex-col items-center gap-2">
+              <button onClick={signOut} title="Sign Out" className="p-3 rounded-2xl text-zinc-400 hover:text-white hover:bg-zinc-900 transition cursor-pointer"><LogOut className="w-5 h-5" /></button>
+            </div>
+          </nav>
+
+          <div className="order-1 md:order-2 flex-1 flex overflow-hidden min-h-0">
+            <aside className={`${mobileShowChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 shrink-0 bg-[#080808] border-r border-zinc-900 flex-col min-h-0`}>
+              <div className="p-4 border-b border-zinc-900">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <WhisperLogo className="w-8 h-8 md:hidden" />
+                    <h2 className="text-lg font-bold text-white tracking-tight">{activeTab === 'chats' ? 'Chats' : activeTab === 'contacts' ? 'My Clients' : 'Account Settings'}</h2>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {activeTab === 'chats' && <button onClick={() => goTab('contacts')} className="px-2.5 py-1.5 rounded-xl bg-white text-black font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-200 transition cursor-pointer"><MessageSquarePlus className="w-3.5 h-3.5" /><span>New</span></button>}
+                    {activeTab === 'contacts' && <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded-xl bg-white text-black font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-200 transition cursor-pointer"><UserPlus2 className="w-3.5 h-3.5" /><span>Add by Code</span></button>}
+                  </div>
+                </div>
+                {(activeTab === 'chats' || activeTab === 'contacts') && (
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={activeTab === 'chats' ? 'Search chats...' : 'Search clients...'} className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none" />
+                  </div>
+                )}
+              </div>
+
+              {activeTab === 'chats' && (
+                <div className="flex-1 overflow-y-auto divide-y divide-zinc-900/70">
+                  {convs.length === 0 && <div className="p-6 text-xs text-zinc-500 text-center">No chats yet. Open the Clients tab and tap a client to start an encrypted chat.</div>}
+                  {convs.map(({ c, last, unread }) => (
+                    <button key={c.id} onClick={() => openChat(c.id)} className={`w-full text-left px-4 py-3.5 flex items-center gap-3.5 transition cursor-pointer ${openId === c.id ? 'bg-zinc-900' : 'hover:bg-zinc-950'}`}>
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-base shrink-0 ${openId === c.id ? 'bg-white text-black' : 'bg-zinc-800 text-white border border-zinc-700'}`}>{c.alias.charAt(0)}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1"><span className="text-sm font-bold text-white truncate">{c.alias}</span><span className="text-[11px] text-zinc-400 shrink-0">{fmt(last.ts)}</span></div>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <p className="text-xs text-zinc-400 truncate flex items-center gap-1">{last.mine && <CheckCheck className="w-3.5 h-3.5 text-white shrink-0 inline" />}<span className="truncate">{last.t}</span></p>
+                          {unread > 0 && <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shrink-0">{unread}</span>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'contacts' && (
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  <div className="px-2 py-1 text-[11px] text-zinc-400 flex items-center justify-between">
+                    <span>Your Added Clients ({shownContacts.length}):</span>
+                    <button onClick={() => setShowAdd(true)} className="text-white hover:underline font-semibold">+ Add by Code</button>
+                  </div>
+                  {shownContacts.map((u) => (
+                    <div key={u.id} className="p-3 rounded-2xl bg-black border border-zinc-900 hover:border-zinc-700 flex items-center justify-between gap-2 transition">
+                      <div onClick={() => openChat(u.id)} className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
+                        <div className="w-11 h-11 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{u.alias.charAt(0)}</div>
+                        <div className="min-w-0"><div className="text-sm font-bold text-white truncate">{u.alias}</div><div className="text-[11px] text-zinc-400 truncate">{u.bio || u.whisper_code}</div></div>
+                      </div>
+                      <button onClick={() => openChat(u.id)} className="p-2 rounded-xl bg-white text-black hover:bg-zinc-200 cursor-pointer shrink-0" title="Chat"><MessageSquare className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'account' && (
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  <div className="p-4 rounded-2xl bg-black border border-zinc-800 flex items-center gap-3.5 mb-2">
+                    <div className="w-12 h-12 rounded-full bg-white text-black font-bold text-lg flex items-center justify-center shrink-0">{me.alias.charAt(0)}</div>
+                    <div className="min-w-0"><div className="text-sm font-bold text-white truncate">{me.alias}</div><div className="text-xs font-mono text-zinc-300">{me.whisper_code}</div></div>
+                  </div>
+                  {accountSubView === 'main' && (
+                    <div className="space-y-2">
+                      <button onClick={() => setAccountSubView('profile')} className="w-full p-4 rounded-2xl bg-black hover:bg-zinc-900 border border-zinc-800 flex items-center justify-between transition cursor-pointer group">
+                        <div className="flex items-center gap-3"><Settings className="w-5 h-5 text-white" /><div className="text-left"><div className="text-sm font-bold text-white">Edit Account & Password</div><div className="text-[11px] text-zinc-400">Change name, bio, or account password</div></div></div>
+                        <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition" />
+                      </button>
+                      <button onClick={signOut} className="w-full mt-4 py-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-white font-semibold text-xs flex items-center justify-center gap-2 border border-zinc-800 cursor-pointer"><LogOut className="w-4 h-4" /><span>Sign Out</span></button>
+                    </div>
+                  )}
+                  {accountSubView === 'profile' && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
+                        <button onClick={() => setAccountSubView('main')} className="p-1.5 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
+                        <h3 className="text-sm font-bold text-white">Edit Account & Password</h3>
+                      </div>
+                      <form onSubmit={handleSaveProfile} className="space-y-3.5">
+                        <div><label className="block text-xs text-zinc-400 mb-1">Display Name</label><input type="text" value={editAlias} onChange={(e) => setEditAlias(e.target.value)} className="w-full bg-[#090909] border border-zinc-800 focus:border-white rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none" /></div>
+                        <div><label className="block text-xs text-zinc-400 mb-1">Bio / Title</label><input type="text" value={editBio} onChange={(e) => setEditBio(e.target.value)} className="w-full bg-[#090909] border border-zinc-800 focus:border-white rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none" /></div>
+                        <div className="pt-2 border-t border-zinc-900 space-y-3">
+                          <div className="text-xs font-semibold text-zinc-300">Change Password</div>
+                          <div><label className="block text-xs text-zinc-400 mb-1">New Password (leave empty to keep)</label><input type="password" autoComplete="new-password" value={newPass} onChange={(e) => setNewPass(e.target.value)} className="w-full bg-[#090909] border border-zinc-800 focus:border-white rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none" /></div>
+                        </div>
+                        <button type="submit" className="w-full py-3 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs cursor-pointer">Save Changes</button>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="p-3 border-t border-zinc-900 bg-black flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-white text-black font-bold flex items-center justify-center text-xs shrink-0">{me.alias.charAt(0)}</div>
+                  <div className="min-w-0"><div className="font-bold text-white truncate">{me.alias}</div><div className="text-[10px] font-mono text-zinc-400 truncate">{me.whisper_code}</div></div>
+                </div>
+                <button onClick={signOut} className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[11px] text-zinc-200 border border-zinc-800 shrink-0 cursor-pointer">Sign Out</button>
+              </div>
+            </aside>
+
+            <main className={`${mobileShowChat ? 'flex' : 'hidden md:flex'} flex-1 flex-col bg-black relative min-h-0 min-w-0`}>
+              {activeTab === 'chats' && activeContact ? (
+                <>
+                  <div className="h-16 px-4 border-b border-zinc-900 bg-[#070707] flex items-center gap-3 z-10 shrink-0">
+                    <button onClick={() => setMobileShowChat(false)} className="md:hidden p-2 rounded-xl bg-zinc-900 text-white"><ChevronLeft className="w-4 h-4" /></button>
+                    <div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{activeContact.alias.charAt(0)}</div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-white truncate flex items-center gap-2"><span>{activeContact.alias}</span><Lock className="w-3.5 h-3.5 text-zinc-300 shrink-0" /></div>
+                      <div className="text-[11px] text-zinc-400 truncate">End-to-end encrypted • {activeContact.whisper_code}</div>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 min-h-0">
+                    <div className="flex justify-center mb-4">
+                      <div className="max-w-md text-center px-4 py-2 rounded-2xl bg-[#0b0b0b] border border-zinc-800 text-[11px] text-zinc-400 flex items-center gap-2"><Lock className="w-3.5 h-3.5 text-white shrink-0" /><span>Messages are end-to-end encrypted. Only you and {activeContact.alias} can read them.</span></div>
+                    </div>
+                    {activeMsgs.map((m) => (
+                      <div key={m.id} className={`flex flex-col ${m.mine ? 'items-end' : 'items-start'}`}>
+                        <div className={`max-w-[85%] sm:max-w-lg rounded-2xl px-4 py-2.5 ${m.mine ? 'bg-white text-black shadow-md' : 'bg-[#121212] text-white border border-zinc-800'}`}>
+                          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{m.t}</p>
+                          <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[10px] opacity-70"><Lock className="w-2.5 h-2.5" /><span>{fmt(m.ts)}</span>{m.mine && <CheckCheck className="w-3.5 h-3.5" />}</div>
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={endRef} />
+                  </div>
+                  <form onSubmit={handleSend} className="p-3 bg-[#070707] border-t border-zinc-900 flex items-center gap-2 shrink-0">
+                    <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Encrypted message..." className="flex-1 bg-black border border-zinc-800 focus:border-white rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none" />
+                    <button type="submit" className="px-4 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"><Send className="w-4 h-4" /><span className="hidden sm:inline">Send</span></button>
+                  </form>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6"><WhisperLogo className="w-20 h-20 mb-4 opacity-80" /><p className="text-xs text-zinc-500">Select a chat to start messaging.</p></div>
+              )}
+            </main>
+          </div>
+
+          {showAdd && (
+            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setShowAdd(false)}>
+              <form onSubmit={handleAdd} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-[#090909] border border-zinc-800 rounded-3xl p-6 space-y-4">
+                <h3 className="text-base font-bold text-white">Add Client by Whisper-Code</h3>
+                <input type="text" autoFocus required value={addCode} onChange={(e) => setAddCode(e.target.value)} placeholder="WSP-0000-NAME" autoCapitalize="characters" className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl px-4 py-3 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none" />
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setShowAdd(false)} className="flex-1 py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-semibold text-xs cursor-pointer">Cancel</button>
+                  <button type="submit" className="flex-1 py-3 rounded-xl bg-white text-black font-bold text-xs cursor-pointer">Add & Chat</button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    createRoot(document.getElementById('root')).render(<App />);
+  </script>
 </body>
 </html>

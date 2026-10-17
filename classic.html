@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Whisper</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif}
+#app{height:100%;overflow-y:auto;padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 90px)}
+.w{max-width:520px;margin:0 auto}
+input{width:100%;background:#000;border:1px solid #27272a;border-radius:12px;color:#fff;padding:12px;font-size:16px;margin:6px 0 12px}
+input:focus{outline:0;border-color:#fff}
+button{background:#fff;color:#000;border:0;border-radius:12px;padding:12px 16px;font-weight:700;font-size:14px}
+button.g{background:#18181b;color:#fff;border:1px solid #27272a}
+.card{background:#0a0a0a;border:1px solid #27272a;border-radius:16px;padding:14px;margin:12px 0}
+.m{font-family:ui-monospace,Menlo,monospace}.s{color:#a1a1aa;font-size:12px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+#toast{position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:12px;right:12px;background:#fff;color:#000;padding:12px;border-radius:14px;display:none;font-size:13px;font-weight:600;z-index:9}
+.av{width:42px;height:42px;border-radius:50%;background:#fff;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.bd{background:#fff;color:#000;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:4px}
+.bub{max-width:80%;margin:3px 0;padding:8px 12px;border-radius:16px;background:#121212;border:1px solid #27272a;font-size:15px;white-space:pre-wrap;word-break:break-word}
+.bub.me{background:#fff;color:#000;border-color:#fff}
+.inp{position:sticky;bottom:calc(env(safe-area-inset-bottom) + 58px);background:#000;padding:8px 0;display:flex;gap:8px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#050505;border-top:1px solid #18181b;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;color:#a1a1aa;border-radius:0;padding:16px 4px;border-top:2px solid transparent}
+nav button.on{color:#fff;border-top-color:#fff}
+h2{margin:8px 0}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="/chat.js"></script>
+</head>
+<body>
+<div id="app"></div><div id="toast"></div>
+<script>
+const SB_URL = 'https://bbpbeigvfrdshcyydwru.supabase.co';
+const SB_KEY = 'sb_publishable_L1joup6cLTwCnb6M4Zxlrg_W7nSJBdi';
+const sb = supabase.createClient(SB_URL, SB_KEY);
+const $ = s => document.querySelector(s), app = $('#app');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const toast = m => { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3500); };
+const emailOf = c => c.trim().toLowerCase() + '@whisper.local';
+let me = null, timer = null;
+
+async function loadMe() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return null;
+  const { data } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+  return data;
+}
+async function api(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  const r = await fetch(SB_URL + '/functions/v1/admin', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: 'Bearer ' + session.access_token }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+}
+
+function loginView(err) {
+  clearInterval(timer); if (window.WhisperChat) WhisperChat.stop();
+  app.innerHTML = `<div class="w" style="padding-top:8vh;text-align:center">
+    <img src="/icons/icon-192.png" width="84" height="84" style="border-radius:18px">
+    <h1 style="margin:14px 0 4px">Welcome to Whisper</h1>
+    <div class="s" style="margin-bottom:22px">Private, invite-only messenger. Sign in with the Whisper-Code and password from your Admin.</div>
+    ${err ? `<div class="card" style="text-align:left;font-size:13px">${esc(err)}</div>` : ''}
+    <form id="f" style="text-align:left"><label class="s">Your Whisper-Code</label>
+    <input id="c" class="m" placeholder="WSP-0000-NAME" autocapitalize="characters" autocomplete="username" required>
+    <label class="s">Password</label><input id="p" type="password" autocomplete="current-password" required>
+    <button style="width:100%;padding:14px">Sign In</button></form></div>`;
+  $('#f').onsubmit = async e => {
+    e.preventDefault();
+    const { error } = await sb.auth.signInWithPassword({ email: emailOf($('#c').value), password: $('#p').value });
+    if (error) return loginView('Invalid Whisper-Code or password, or access has been stopped.');
+    boot();
+  };
+}
+
+async function boot() {
+  me = await loadMe();
+  if (!me) { await sb.auth.signOut(); return loginView(); }
+  if (me.status !== 'active') { await sb.auth.signOut(); return loginView('This Whisper-Code has been stopped by the Administrator.'); }
+  mainView();
+  clearInterval(timer);
+  timer = setInterval(async () => {
+    const m = await loadMe();
+    if (!m || m.status !== 'active') { await sb.auth.signOut(); loginView('Your access was stopped by the Administrator.'); }
+  }, 30000);
+}
+
+let tab = 'chats';
+function goTab(t) {
+  tab = t;
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  const el = $('#tab'); el.onclick = null;
+  if (t === 'chats' || t === 'contacts') WhisperChat.show(t, el);
+  else { WhisperChat.hide(); t === 'admin' ? adminTab(el) : accountTab(el); }
+}
+window.goTab = goTab;
+async function mainView() {
+  const tabs = [['chats', 'Chats'], ['contacts', 'Clients'], ...(me.role === 'admin' ? [['admin', 'Admin']] : []), ['account', 'Account']];
+  app.innerHTML = `<div class="w"><div id="tab"></div></div><nav id="nav">${tabs.map(([k, l]) => `<button data-t="${k}">${l}${k === 'chats' ? '<span class="bd" id="bc" style="display:none"></span>' : ''}</button>`).join('')}</nav>`;
+  $('#nav').onclick = e => { const b = e.target.closest('button'); if (b) goTab(b.dataset.t); };
+  goTab('account'); goTab(location.hash === '#admin' && me.role === 'admin' ? 'admin' : 'chats');
+  try {
+    await WhisperChat.start(sb, me, n => { const b = $('#bc'); if (b) { b.textContent = n; b.style.display = n ? 'inline-block' : 'none'; } });
+  } catch (x) { toast('Secure chat could not start: ' + (x.message || x)); }
+}
+
+function accountTab(el) {
+  el.innerHTML = `<h2>Account</h2><div class="card"><div class="s m">${esc(me.whisper_code)}</div>
+    <label class="s">Display name</label><input id="al" value="${esc(me.alias)}" maxlength="60">
+    <label class="s">Bio</label><input id="bi" value="${esc(me.bio)}" maxlength="120">
+    <label class="s">New password (leave empty to keep current)</label><input id="pw" type="password" autocomplete="new-password">
+    <button id="sv" style="width:100%">Save changes</button></div>
+    <button class="g" id="out" style="width:100%">Sign out</button>`;
+  $('#sv').onclick = async () => {
+    const pw = $('#pw').value;
+    if (pw && pw.length < 8) return toast('Password must be at least 8 characters.');
+    const { error } = await sb.from('profiles').update({ alias: $('#al').value.trim() || me.alias, bio: $('#bi').value.trim() }).eq('id', me.id);
+    if (error) return toast('Could not save.');
+    if (pw) { const r = await sb.auth.updateUser({ password: pw }); if (r.error) return toast(r.error.message); }
+    const m = await loadMe(); if (m) me = m; toast('Saved.');
+  };
+  $('#out').onclick = async () => { WhisperChat.stop(); await sb.auth.signOut(); loginView(); };
+}
+
+function adminTab(el) {
+  el.innerHTML = `<a href="/app.html" style="color:#fff;font-size:13px">&#8249; Back to Whisper</a><h2>Admin</h2><div class="card"><b>Create new client</b>
+    <label class="s" style="display:block;margin-top:10px">Client full name</label><input id="n" maxlength="60">
+    <label class="s">Bio / note (optional)</label><input id="b" maxlength="120">
+    <button id="mk" style="width:100%">+ Create client</button><div id="cred"></div></div>
+    <div class="card"><b>All clients</b><div id="list" class="s" style="margin-top:8px">Loading...</div></div>`;
+  $('#mk').onclick = async () => {
+    const alias = $('#n').value.trim();
+    if (!alias) return toast('Please enter the client name.');
+    $('#mk').disabled = true;
+    try {
+      const r = await api({ action: 'create', alias, bio: $('#b').value.trim() });
+      const text = `Whisper-Code: ${r.code}\nPassword: ${r.password}`;
+      $('#cred').innerHTML = `<div class="card m" style="font-size:13px;white-space:pre-wrap">${esc(text)}</div>
+        <div class="s">Shown only once. Copy it now and send it to the client.</div>
+        <button class="g" id="cp" style="margin-top:8px">Copy login</button>`;
+      $('#cp').onclick = () => navigator.clipboard.writeText(text).then(() => toast('Copied.'));
+      $('#n').value = ''; $('#b').value = ''; renderClients();
+    } catch (x) { toast(x.message); }
+    $('#mk').disabled = false;
+  };
+  $('#list').onclick = async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    try {
+      if (b.dataset.a === 'del') { if (!confirm('Permanently delete this client?')) return; await api({ action: 'delete', id: b.dataset.id }); toast('Client deleted.'); }
+      else { await api({ action: 'status', id: b.dataset.id, status: b.dataset.a }); toast('Updated.'); }
+      renderClients();
+    } catch (x) { toast(x.message); }
+  };
+  renderClients();
+}
+
+async function renderClients() {
+  const { data, error } = await sb.from('profiles').select('*').order('created_at', { ascending: false });
+  if (error) return $('#list').textContent = 'Could not load clients.';
+  $('#list').innerHTML = data.map(u => `<div class="card row" style="background:#000">
+    <div><b style="color:#fff">${esc(u.alias)}</b> <span class="s">${u.status === 'active' ? 'Active' : 'Paused'}</span>
+    <div class="s m">${esc(u.whisper_code)}</div></div>
+    ${u.role === 'admin' ? '<span class="s">Admin</span>' : `<div class="row">
+      <button class="g" data-id="${u.id}" data-a="${u.status === 'active' ? 'paused' : 'active'}">${u.status === 'active' ? 'Pause' : 'Resume'}</button>
+      <button class="g" data-id="${u.id}" data-a="del">Delete</button></div>`}</div>`).join('');
+}
+
+boot();
+</script>
+</body>
+</html>

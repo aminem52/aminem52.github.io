@@ -1,5 +1,5 @@
 window.WhisperChat = (function () {
-  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false };
+  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false, subs: [] };
   const enc = new TextEncoder(), dec = new TextDecoder();
   const b64 = u => btoa(String.fromCharCode(...new Uint8Array(u)));
   const ub = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
@@ -91,6 +91,7 @@ window.WhisperChat = (function () {
   const openChat = id => { S.open = id; S.msgs.forEach(m => { if (m.peer === id) m.unread = false; }); save(); window.goTab('chats'); };
 
   function render() {
+    S.subs.forEach(f => f());
     if (!S.el) return;
     if (S.shown && S.tab === 'chats' && S.open && q('#msgs')) fillMsgs();
     else if (S.shown) full();
@@ -172,6 +173,17 @@ window.WhisperChat = (function () {
       if (S.vis) document.removeEventListener('visibilitychange', S.vis);
       if (S.sb) S.sb.removeAllChannels();
     },
+    getState() { return { contacts: S.contacts, msgs: S.msgs }; },
+    subscribe(f) { S.subs.push(f); return () => { S.subs = S.subs.filter(x => x !== f); }; },
+    async sendTo(id, text) { const p = S.contacts.find(c => c.id === id); if (!p) throw new Error('Unknown client.'); await send(p, text); },
+    async addByCode(code) {
+      const { data, error } = await S.sb.rpc('lookup_by_code', { p_code: code });
+      const p = data && data[0];
+      if (error || !p) throw new Error('Whisper-Code not found.');
+      if (p.id === S.me.id) throw new Error('That is your own Whisper-Code.');
+      addC(p); await save(); render(); return p;
+    },
+    markRead(id) { let ch = false; S.msgs.forEach(m => { if (m.peer === id && m.unread) { m.unread = false; ch = true; } }); if (ch) { save(); render(); } },
     show(tab, el) { S.tab = tab; S.el = el; S.shown = true; full(); },
     hide() { S.shown = false; },
   };
