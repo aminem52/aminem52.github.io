@@ -1,5 +1,5 @@
 window.WhisperChat = (function () {
-  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false, subs: [] };
+  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false, subs: [], timers: {} };
   const enc = new TextEncoder(), dec = new TextDecoder();
   const b64 = u => btoa(String.fromCharCode(...new Uint8Array(u)));
   const ub = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
@@ -13,7 +13,7 @@ window.WhisperChat = (function () {
     get: k => dbp.then(db => new Promise(ok => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); })),
     set: (k, v) => dbp.then(db => new Promise(ok => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = ok; t.onerror = ok; })),
   };
-  const save = () => Promise.all([kv.set(S.me.id + ':contacts', S.contacts), kv.set(S.me.id + ':msgs', S.msgs)]);
+  const save = () => Promise.all([kv.set(S.me.id + ':contacts', S.contacts), kv.set(S.me.id + ':msgs', S.msgs), kv.set(S.me.id + ':timers', S.timers)]);
 
   // Identity key: private key is generated on this device and can never be exported
   async function ensureKeys() {
@@ -58,33 +58,40 @@ window.WhisperChat = (function () {
     if (data && data[0]) addC(data[0]);
   }
 
-  async function send(peer, text) {
+  async function send(peer, text, opts = {}) {
     const k = await shared(peer.id);
-    const m = { id: uid(), peer: peer.id, mine: true, t: text, ts: Date.now(), st: 's' };
+    const ts = Date.now();
+    const m = { id: uid(), peer: peer.id, mine: true, t: text, ts, st: 's', rp: opts.rp, exp: opts.ex ? ts + opts.ex : undefined };
     const { error } = await S.sb.from('relay_messages').insert({
       sender_id: S.me.id, recipient_id: peer.id, conv_id: [S.me.id, peer.id].sort().join('_'),
-      ciphertext: await seal(k, { id: m.id, t: text, ts: m.ts }),
+      ciphertext: await seal(k, { id: m.id, t: text, ts, rp: opts.rp, ex: opts.ex }),
     });
     if (error) throw new Error('Could not send. Check your connection.');
     S.msgs.push(m); await save(); render();
   }
-  async function receipt(peerId, ids, st) {
+  async function evt(peerId, obj) {
     try {
       const k = await shared(peerId);
       await S.sb.from('relay_messages').insert({
         sender_id: S.me.id, recipient_id: peerId, conv_id: [S.me.id, peerId].sort().join('_'),
-        ciphertext: await seal(k, { k: 'r', ids, s: st }),
+        ciphertext: await seal(k, obj),
       });
-    } catch (e) { /* receipts are best effort */ }
+    } catch (e) { /* best effort */ }
   }
+  const receipt = (peerId, ids, st) => evt(peerId, { k: 'r', ids, s: st });
   async function ingest(row) {
     try {
       const o = await unseal(await shared(row.sender_id), row.ciphertext);
       if (o.k === 'r') {
         const rank = { s: 1, d: 2, r: 3 };
         (o.ids || []).forEach(id => { const m = S.msgs.find(x => x.id === id && x.mine); if (m && (rank[o.s] || 0) > (rank[m.st] || 1)) m.st = o.s; });
+      } else if (o.k === 'x') {
+        const m = S.msgs.find(x => x.id === o.id && x.peer === row.sender_id);
+        if (m) { m.rx = { ...(m.rx || {}) }; if (o.e) m.rx.them = o.e; else delete m.rx.them; }
+      } else if (o.k === 't') {
+        S.timers[row.sender_id] = o.ms || 0;
       } else {
-        if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true });
+        if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true, rp: o.rp, exp: o.ex ? Date.now() + o.ex : undefined });
         await ensureContact(row.sender_id);
         receipt(row.sender_id, [o.id], 'd');
       }
@@ -169,6 +176,7 @@ window.WhisperChat = (function () {
       S.keys = await ensureKeys();
       S.contacts = (await kv.get(me.id + ':contacts')) || [];
       S.msgs = (await kv.get(me.id + ':msgs')) || [];
+      S.timers = (await kv.get(me.id + ':timers')) || {};
       if (me.role === 'admin') {
         const { data } = await sb.from('profiles').select('id,whisper_code,alias,bio').neq('id', me.id);
         (data || []).forEach(addC);
@@ -180,18 +188,26 @@ window.WhisperChat = (function () {
       sb.channel('inbox').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'relay_messages', filter: 'recipient_id=eq.' + me.id },
         async p => { await ingest(p.new); await save(); render(); }).subscribe();
       S.iv = setInterval(pull, 20000);
+      S.pv = setInterval(() => { const n = Date.now(), c = S.msgs.length; S.msgs = S.msgs.filter(m => !m.exp || m.exp > n); if (S.msgs.length !== c) { save(); render(); } }, 1000);
       document.addEventListener('visibilitychange', S.vis = () => { if (!document.hidden) pull(); });
       pull();
       render();
     },
     stop() {
-      clearInterval(S.iv);
+      clearInterval(S.iv); clearInterval(S.pv);
       if (S.vis) document.removeEventListener('visibilitychange', S.vis);
       if (S.sb) S.sb.removeAllChannels();
     },
-    getState() { return { contacts: S.contacts, msgs: S.msgs }; },
+    getState() { return { contacts: S.contacts, msgs: S.msgs, timers: S.timers }; },
     subscribe(f) { S.subs.push(f); return () => { S.subs = S.subs.filter(x => x !== f); }; },
-    async sendTo(id, text) { const p = S.contacts.find(c => c.id === id); if (!p) throw new Error('Unknown client.'); await send(p, text); },
+    async sendTo(id, text, opts) { const p = S.contacts.find(c => c.id === id); if (!p) throw new Error('Unknown client.'); await send(p, text, opts); },
+    react(peerId, msgId, emoji) {
+      const m = S.msgs.find(x => x.id === msgId); if (!m) return;
+      m.rx = { ...(m.rx || {}) }; if (emoji) m.rx.me = emoji; else delete m.rx.me;
+      save(); render(); evt(peerId, { k: 'x', id: msgId, e: emoji || '' });
+    },
+    deleteMsg(msgId) { S.msgs = S.msgs.filter(m => m.id !== msgId); save(); render(); },
+    setTimer(peerId, ms) { S.timers[peerId] = ms; save(); render(); evt(peerId, { k: 't', ms }); },
     async addByCode(code) {
       const { data, error } = await S.sb.rpc('lookup_by_code', { p_code: code });
       const p = data && data[0];
