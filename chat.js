@@ -61,13 +61,15 @@ window.WhisperChat = (function () {
   async function send(peer, text, opts = {}) {
     const k = await shared(peer.id);
     const ts = Date.now();
-    const m = { id: uid(), peer: peer.id, mine: true, t: text, ts, st: 's', rp: opts.rp, fw: opts.fw, exp: opts.ex ? ts + opts.ex : undefined };
+    const m = { id: uid(), peer: peer.id, mine: true, t: text, ts, st: 's', rp: opts.rp, fw: opts.fw, att: opts.att, exp: opts.ex ? ts + opts.ex : undefined };
     const { error } = await S.sb.from('relay_messages').insert({
       sender_id: S.me.id, recipient_id: peer.id, conv_id: [S.me.id, peer.id].sort().join('_'),
-      ciphertext: await seal(k, { id: m.id, t: text, ts, rp: opts.rp, ex: opts.ex, fw: opts.fw }),
+      ciphertext: await seal(k, { id: m.id, t: text, ts, rp: opts.rp, ex: opts.ex, fw: opts.fw, att: opts.att }),
     });
     if (error) throw new Error('Could not send. Check your connection.');
-    S.msgs.push(m); await save(); render();
+    S.msgs.push(m);
+    if (opts.localBlob) await kv.set(S.me.id + ':blob:' + m.id, opts.localBlob);
+    await save(); render();
   }
   async function evt(peerId, obj) {
     try {
@@ -78,6 +80,7 @@ window.WhisperChat = (function () {
       });
     } catch (e) { /* best effort */ }
   }
+  const dropBlobs = list => list.forEach(m => { if (m.att) kv.set(S.me.id + ':blob:' + m.id, null); });
   const receipt = (peerId, ids, st) => evt(peerId, { k: 'r', ids, s: st });
   async function ingest(row) {
     if (S.blocked.includes(row.sender_id)) { await S.sb.from('relay_messages').delete().eq('id', row.id); return; }
@@ -92,7 +95,7 @@ window.WhisperChat = (function () {
       } else if (o.k === 't') {
         S.timers[row.sender_id] = o.ms || 0;
       } else {
-        if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true, rp: o.rp, fw: o.fw, exp: o.ex ? Date.now() + o.ex : undefined });
+        if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true, rp: o.rp, fw: o.fw, att: o.att, exp: o.ex ? Date.now() + o.ex : undefined });
         await ensureContact(row.sender_id);
         receipt(row.sender_id, [o.id], 'd');
       }
@@ -190,7 +193,7 @@ window.WhisperChat = (function () {
       sb.channel('inbox').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'relay_messages', filter: 'recipient_id=eq.' + me.id },
         async p => { await ingest(p.new); await save(); render(); }).subscribe();
       S.iv = setInterval(pull, 20000);
-      S.pv = setInterval(() => { const n = Date.now(), c = S.msgs.length; S.msgs = S.msgs.filter(m => !m.exp || m.exp > n); if (S.msgs.length !== c) { save(); render(); } }, 1000);
+      S.pv = setInterval(() => { const n = Date.now(), c = S.msgs.length; dropBlobs(S.msgs.filter(m => m.exp && m.exp <= n)); S.msgs = S.msgs.filter(m => !m.exp || m.exp > n); if (S.msgs.length !== c) { save(); render(); } }, 1000);
       document.addEventListener('visibilitychange', S.vis = () => { if (!document.hidden) pull(); });
       pull();
       render();
@@ -208,13 +211,46 @@ window.WhisperChat = (function () {
       m.rx = { ...(m.rx || {}) }; if (emoji) m.rx.me = emoji; else delete m.rx.me;
       save(); render(); evt(peerId, { k: 'x', id: msgId, e: emoji || '' });
     },
+    async sendMedia(peerId, blob, meta, opts = {}) {
+      const peer = S.contacts.find(c => c.id === peerId);
+      if (!peer) throw new Error('Unknown client.');
+      if (S.blocked.includes(peerId)) throw new Error('Unblock this client to send messages.');
+      if (blob.size > 25 * 1024 * 1024) throw new Error('Files can be up to 25 MB.');
+      await shared(peerId); // fail early if the other person has no key yet
+      const buf = await blob.arrayBuffer();
+      const fk = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, fk, buf);
+      const path = peerId + '/' + uid();
+      const up = await S.sb.storage.from('relay-files').upload(path, new Blob([ct], { type: 'application/octet-stream' }));
+      if (up.error) throw new Error('Upload failed. Check your connection.');
+      const att = { p: path, k: b64(await crypto.subtle.exportKey('raw', fk)), iv: b64(iv), n: meta.name, s: blob.size, m: meta.mime, d: meta.dur, kind: meta.kind };
+      const label = meta.kind === 'v' ? 'Voice message (' + meta.dur + 's)' : meta.name;
+      await send(peer, label, { ...opts, att, localBlob: { buf, mime: meta.mime } });
+    },
+    async getMedia(msgId) {
+      const cached = await kv.get(S.me.id + ':blob:' + msgId);
+      if (cached) return cached;
+      const m = S.msgs.find(x => x.id === msgId);
+      if (!m || !m.att || m.mine) throw new Error('This file is not available on this phone.');
+      const dl = await S.sb.storage.from('relay-files').download(m.att.p);
+      if (dl.error || !dl.data) throw new Error('This file is no longer available.');
+      const key = await crypto.subtle.importKey('raw', ub(m.att.k), { name: 'AES-GCM' }, false, ['decrypt']);
+      let buf;
+      try { buf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub(m.att.iv) }, key, await dl.data.arrayBuffer()); }
+      catch (e) { throw new Error('Could not decrypt this file.'); }
+      const out = { buf, mime: m.att.m || 'application/octet-stream' };
+      await kv.set(S.me.id + ':blob:' + msgId, out);
+      S.sb.storage.from('relay-files').remove([m.att.p]); // delivered: remove from server
+      return out;
+    },
     toggleBlock(id) {
       const was = S.blocked.includes(id);
       S.blocked = was ? S.blocked.filter(x => x !== id) : [...S.blocked, id];
       save(); render(); return !was;
     },
-    deleteChat(id) { S.msgs = S.msgs.filter(m => m.peer !== id); save(); render(); },
-    wipe() { S.msgs = []; save(); render(); },
+    deleteChat(id) { dropBlobs(S.msgs.filter(m => m.peer === id)); S.msgs = S.msgs.filter(m => m.peer !== id); save(); render(); },
+    wipe() { dropBlobs(S.msgs); S.msgs = []; save(); render(); },
     async safety(peerId) {
       const { data } = await S.sb.rpc('get_profiles', { p_ids: [peerId] });
       const p = data && data[0]; if (!p || !p.public_key) return '';
@@ -245,7 +281,7 @@ window.WhisperChat = (function () {
       S.blocked = Array.from(new Set([...S.blocked, ...(d.blocked || [])]));
       await save(); render(); return n;
     },
-    deleteMsg(msgId) { S.msgs = S.msgs.filter(m => m.id !== msgId); save(); render(); },
+    deleteMsg(msgId) { dropBlobs(S.msgs.filter(m => m.id === msgId)); S.msgs = S.msgs.filter(m => m.id !== msgId); save(); render(); },
     setTimer(peerId, ms) { S.timers[peerId] = ms; save(); render(); evt(peerId, { k: 't', ms }); },
     async addByCode(code) {
       const { data, error } = await S.sb.rpc('lookup_by_code', { p_code: code });
