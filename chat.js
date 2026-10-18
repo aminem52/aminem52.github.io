@@ -5,6 +5,7 @@ window.WhisperChat = (function () {
   const ub = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const q = s => S.el.querySelector(s);
+  const uid = () => (crypto.randomUUID ? crypto.randomUUID() : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
 
   // Local-only storage (IndexedDB): keys, contacts and messages never leave this device
   const dbp = new Promise((ok, no) => { const r = indexedDB.open('whisper-v2', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
@@ -59,7 +60,7 @@ window.WhisperChat = (function () {
 
   async function send(peer, text) {
     const k = await shared(peer.id);
-    const m = { id: crypto.randomUUID(), peer: peer.id, mine: true, t: text, ts: Date.now() };
+    const m = { id: uid(), peer: peer.id, mine: true, t: text, ts: Date.now(), st: 's' };
     const { error } = await S.sb.from('relay_messages').insert({
       sender_id: S.me.id, recipient_id: peer.id, conv_id: [S.me.id, peer.id].sort().join('_'),
       ciphertext: await seal(k, { id: m.id, t: text, ts: m.ts }),
@@ -67,11 +68,26 @@ window.WhisperChat = (function () {
     if (error) throw new Error('Could not send. Check your connection.');
     S.msgs.push(m); await save(); render();
   }
+  async function receipt(peerId, ids, st) {
+    try {
+      const k = await shared(peerId);
+      await S.sb.from('relay_messages').insert({
+        sender_id: S.me.id, recipient_id: peerId, conv_id: [S.me.id, peerId].sort().join('_'),
+        ciphertext: await seal(k, { k: 'r', ids, s: st }),
+      });
+    } catch (e) { /* receipts are best effort */ }
+  }
   async function ingest(row) {
     try {
       const o = await unseal(await shared(row.sender_id), row.ciphertext);
-      if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true });
-      await ensureContact(row.sender_id);
+      if (o.k === 'r') {
+        const rank = { s: 1, d: 2, r: 3 };
+        (o.ids || []).forEach(id => { const m = S.msgs.find(x => x.id === id && x.mine); if (m && (rank[o.s] || 0) > (rank[m.st] || 1)) m.st = o.s; });
+      } else {
+        if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true });
+        await ensureContact(row.sender_id);
+        receipt(row.sender_id, [o.id], 'd');
+      }
       await S.sb.from('relay_messages').delete().eq('id', row.id); // delivered: remove from server
     } catch (e) {
       if (e && e.name === 'OperationError') await S.sb.from('relay_messages').delete().eq('id', row.id); // undecryptable
@@ -183,7 +199,13 @@ window.WhisperChat = (function () {
       if (p.id === S.me.id) throw new Error('That is your own Whisper-Code.');
       addC(p); await save(); render(); return p;
     },
-    markRead(id) { let ch = false; S.msgs.forEach(m => { if (m.peer === id && m.unread) { m.unread = false; ch = true; } }); if (ch) { save(); render(); } },
+    markRead(id) {
+      let ch = false;
+      const ids = S.msgs.filter(m => m.peer === id && !m.mine && !m.rs).map(m => m.id);
+      S.msgs.forEach(m => { if (m.peer === id && m.unread) { m.unread = false; ch = true; } });
+      if (ids.length) { S.msgs.forEach(m => { if (ids.includes(m.id)) m.rs = true; }); receipt(id, ids, 'r'); ch = true; }
+      if (ch) { save(); render(); }
+    },
     show(tab, el) { S.tab = tab; S.el = el; S.shown = true; full(); },
     hide() { S.shown = false; },
   };

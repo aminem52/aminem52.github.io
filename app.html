@@ -9,13 +9,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <script type="importmap">
-    { "imports": {
-        "react": "https://esm.sh/react@18.2.0",
-        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-        "lucide-react": "https://esm.sh/lucide-react@0.344.0" } }
+  <script>
+    window.onerror = function (m, s, l) { var d = document.getElementById('root'); if (d) d.innerHTML = '<pre style="color:#fff;padding:16px;white-space:pre-wrap;font-size:12px">Error: ' + m + '\n' + (s || '') + ':' + l + '</pre>'; };
+    setTimeout(function () { var d = document.getElementById('root'); if (d && !d.children.length) d.innerHTML = '<pre style="color:#fff;padding:16px;white-space:pre-wrap;font-size:12px">Whisper is still loading... If this stays black, please tell support the iOS version of this phone.</pre>'; }, 10000);
   </script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide-react@0.344.0/dist/umd/lucide-react.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script src="/chat.js"></script>
   <style>
@@ -30,10 +31,12 @@
 </head>
 <body class="bg-black text-white select-none">
   <div id="root"></div>
-  <script type="text/babel" data-type="module">
-    import React, { useState, useEffect, useRef } from 'react';
-    import { createRoot } from 'react-dom/client';
-    import { Lock, KeyRound, Eye, EyeOff, ArrowRight, ShieldAlert, Send, ChevronLeft, CheckCheck, Search, Users, Settings, LogOut, Sliders, MessageSquare, MessageSquarePlus, UserPlus2 } from 'lucide-react';
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef } = React;
+    const { createRoot } = ReactDOM;
+    const LU = window.lucideReact || window.LucideReact || window.lucide || {};
+    const Ic = (n) => LU[n] || (() => null);
+    const Lock = Ic('Lock'), KeyRound = Ic('KeyRound'), Eye = Ic('Eye'), EyeOff = Ic('EyeOff'), ArrowRight = Ic('ArrowRight'), ShieldAlert = Ic('ShieldAlert'), Send = Ic('Send'), ChevronLeft = Ic('ChevronLeft'), CheckCheck = Ic('CheckCheck'), Search = Ic('Search'), Users = Ic('Users'), Settings = Ic('Settings'), LogOut = Ic('LogOut'), Sliders = Ic('Sliders'), MessageSquare = Ic('MessageSquare'), MessageSquarePlus = Ic('MessageSquarePlus'), UserPlus2 = Ic('UserPlus2'), Check = Ic('Check');
 
     const SB_URL = 'https://bbpbeigvfrdshcyydwru.supabase.co';
     const SB_KEY = 'sb_publishable_L1joup6cLTwCnb6M4Zxlrg_W7nSJBdi';
@@ -57,6 +60,11 @@
         </g>
       </svg>
     );
+
+    const Ticks = ({ st, light }) => st === 'r'
+      ? <CheckCheck className={`w-3.5 h-3.5 shrink-0 ${light ? 'text-white' : 'text-black'}`} />
+      : st === 'd' ? <CheckCheck className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
+      : <Check className="w-3.5 h-3.5 shrink-0 text-zinc-500" />;
 
     function App() {
       const [phase, setPhase] = useState('loading');
@@ -271,7 +279,7 @@
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1"><span className="text-sm font-bold text-white truncate">{c.alias}</span><span className="text-[11px] text-zinc-400 shrink-0">{fmt(last.ts)}</span></div>
                         <div className="flex items-center justify-between gap-2 mt-1">
-                          <p className="text-xs text-zinc-400 truncate flex items-center gap-1">{last.mine && <CheckCheck className="w-3.5 h-3.5 text-white shrink-0 inline" />}<span className="truncate">{last.t}</span></p>
+                          <p className="text-xs text-zinc-400 truncate flex items-center gap-1">{last.mine && <Ticks st={last.st} light />}<span className="truncate">{last.t}</span></p>
                           {unread > 0 && <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shrink-0">{unread}</span>}
                         </div>
                       </div>
@@ -361,7 +369,7 @@
                       <div key={m.id} className={`flex flex-col ${m.mine ? 'items-end' : 'items-start'}`}>
                         <div className={`max-w-[85%] sm:max-w-lg rounded-2xl px-4 py-2.5 ${m.mine ? 'bg-white text-black shadow-md' : 'bg-[#121212] text-white border border-zinc-800'}`}>
                           <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{m.t}</p>
-                          <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[10px] opacity-70"><Lock className="w-2.5 h-2.5" /><span>{fmt(m.ts)}</span>{m.mine && <CheckCheck className="w-3.5 h-3.5" />}</div>
+                          <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[10px] opacity-70"><Lock className="w-2.5 h-2.5" /><span>{fmt(m.ts)}</span>{m.mine && <Ticks st={m.st} />}</div>
                         </div>
                       </div>
                     ))}
