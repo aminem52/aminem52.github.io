@@ -1,5 +1,5 @@
 window.WhisperChat = (function () {
-  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false, subs: [], timers: {}, blocked: [], groups: [] };
+  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false, subs: [], timers: {}, blocked: [], groups: [], calls: [] };
   const enc = new TextEncoder(), dec = new TextDecoder();
   const b64 = u => { const a = new Uint8Array(u); let t = ''; for (let i = 0; i < a.length; i += 8192) t += String.fromCharCode.apply(null, a.subarray(i, i + 8192)); return btoa(t); };
   const ub = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
@@ -13,7 +13,7 @@ window.WhisperChat = (function () {
     get: k => dbp.then(db => new Promise(ok => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); })),
     set: (k, v) => dbp.then(db => new Promise(ok => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = ok; t.onerror = ok; })),
   };
-  const save = () => Promise.all([kv.set(S.me.id + ':contacts', S.contacts), kv.set(S.me.id + ':msgs', S.msgs), kv.set(S.me.id + ':timers', S.timers), kv.set(S.me.id + ':blocked', S.blocked), kv.set(S.me.id + ':groups', S.groups)]);
+  const save = () => Promise.all([kv.set(S.me.id + ':contacts', S.contacts), kv.set(S.me.id + ':msgs', S.msgs), kv.set(S.me.id + ':timers', S.timers), kv.set(S.me.id + ':blocked', S.blocked), kv.set(S.me.id + ':groups', S.groups), kv.set(S.me.id + ':calls', S.calls)]);
 
   // Identity key: private key is generated on this device and can never be exported
   async function ensureKeys() {
@@ -116,6 +116,8 @@ window.WhisperChat = (function () {
           Object.assign(g, { name: String(o.name || 'Group').slice(0, 60), members: o.members || [], owner: row.sender_id });
           for (const mid of g.members) if (mid !== S.me.id) await ensureContact(mid);
         }
+      } else if (o.k === 'c') {
+        if (S.onCall && o.ts && Math.abs(Date.now() - o.ts) < 60000) { await ensureContact(row.sender_id); S.onCall(row.sender_id, o); }
       } else if (o.k === 'gl') {
         const g = S.groups.find(x => x.id === o.gid);
         if (g) g.members = g.members.filter(x => x !== row.sender_id);
@@ -212,6 +214,7 @@ window.WhisperChat = (function () {
       S.timers = (await kv.get(me.id + ':timers')) || {};
       S.blocked = (await kv.get(me.id + ':blocked')) || [];
       S.groups = (await kv.get(me.id + ':groups')) || [];
+      S.calls = (await kv.get(me.id + ':calls')) || [];
       if (me.role === 'admin') {
         const { data } = await sb.from('profiles').select('id,whisper_code,alias,bio').neq('id', me.id);
         (data || []).forEach(addC);
@@ -233,7 +236,7 @@ window.WhisperChat = (function () {
       if (S.vis) document.removeEventListener('visibilitychange', S.vis);
       if (S.sb) S.sb.removeAllChannels();
     },
-    getState() { return { contacts: S.contacts, msgs: S.msgs, timers: S.timers, blocked: S.blocked, groups: S.groups }; },
+    getState() { return { contacts: S.contacts, msgs: S.msgs, timers: S.timers, blocked: S.blocked, groups: S.groups, calls: S.calls }; },
     subscribe(f) { S.subs.push(f); return () => { S.subs = S.subs.filter(x => x !== f); }; },
     async sendTo(id, text, opts) { const p = conv(id); if (!p) throw new Error('Unknown client.'); if (!p.members && S.blocked.includes(id)) throw new Error('Unblock this client to send messages.'); await send(p, text, opts); },
     react(peerId, msgId, emoji) {
@@ -262,6 +265,9 @@ window.WhisperChat = (function () {
       const label = meta.kind === 'v' ? 'Voice message (' + meta.dur + 's)' : meta.name;
       await send(peer, label, { ...opts, att: base, attFor: tid => ({ ...base, p: paths[tid] }), localBlob: { buf, mime: meta.mime } });
     },
+    onCall(fn) { S.onCall = fn; },
+    signal(peerId, obj) { return evt(peerId, { k: 'c', ts: Date.now(), ...obj }); },
+    addCall(c) { S.calls.unshift(c); S.calls = S.calls.slice(0, 100); save(); render(); },
     async createGroup(name, ids) {
       const gid = uid();
       const g = { id: gid, name: name.slice(0, 60), members: [S.me.id, ...ids], owner: S.me.id };
