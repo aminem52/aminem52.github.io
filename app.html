@@ -56,6 +56,16 @@
     const MessageSquare = mkIcon('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>');
     const MessageSquarePlus = mkIcon('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v6"/><path d="M9 10h6"/>');
     const UserPlus2 = mkIcon('<path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><path d="M19 16v6"/><path d="M22 19h-6"/>');
+    const UserPlus = mkIcon('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>');
+    const RefreshCw = mkIcon('<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>');
+    const Copy = mkIcon('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>');
+    const PauseCircle = mkIcon('<circle cx="12" cy="12" r="10"/><line x1="10" x2="10" y1="15" y2="9"/><line x1="14" x2="14" y1="15" y2="9"/>');
+    const PlayCircle = mkIcon('<circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>');
+    const Trash2 = mkIcon('<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>');
+    const Globe = mkIcon('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>');
+    const Database = mkIcon('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>');
+    const HardDrive = mkIcon('<line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>');
+    const ShieldCheck = mkIcon('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>');
 
     const SB_URL = 'https://bbpbeigvfrdshcyydwru.supabase.co';
     const SB_KEY = 'sb_publishable_L1joup6cLTwCnb6M4Zxlrg_W7nSJBdi';
@@ -105,6 +115,14 @@
       const [editBio, setEditBio] = useState('');
       const [newPass, setNewPass] = useState('');
       const [, setTick] = useState(0);
+      const [adminSubTab, setAdminSubTab] = useState('clients');
+      const [clients, setClients] = useState([]);
+      const [newName, setNewName] = useState('');
+      const [newBio, setNewBio] = useState('');
+      const [genCode, setGenCode] = useState('');
+      const [genPass, setGenPass] = useState('');
+      const [domainInput, setDomainInput] = useState('chat.yourprivatebrand.com');
+      const [credInfo, setCredInfo] = useState(null);
       const endRef = useRef(null);
 
       const triggerToast = (msg) => { setToastMessage(msg); setTimeout(() => setToastMessage((p) => (p === msg ? null : p)), 3500); };
@@ -145,6 +163,54 @@
         document.addEventListener('visibilitychange', f);
         return () => document.removeEventListener('visibilitychange', f);
       }, []);
+
+      const genCreds = () => {
+        const words = ['VORTEX', 'SHADOW', 'SPECTRE', 'CIPHER', 'ONYX', 'ZENITH', 'CROWN', 'VAULT', 'NOVA', 'PULSE'];
+        const r = (n) => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+        setGenCode(`WSP-${1000 + r(9000)}-${words[r(words.length)]}`);
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+        let pass = ''; for (let i = 0; i < 8; i++) pass += chars.charAt(r(chars.length));
+        setGenPass(pass);
+      };
+      useEffect(() => { genCreds(); }, []);
+      const loadClients = async () => {
+        const { data } = await sb.from('profiles').select('*').order('created_at', { ascending: false });
+        if (data) setClients(data);
+      };
+      useEffect(() => { if (activeTab === 'admin' && me && me.role === 'admin') loadClients(); }, [activeTab, me]);
+      const adminApi = async (body) => {
+        const { data: { session } } = await sb.auth.getSession();
+        const r = await fetch(SB_URL + '/functions/v1/admin', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: 'Bearer ' + session.access_token }, body: JSON.stringify(body) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'Request failed');
+        return j;
+      };
+      const copyText = (t, msg) => { navigator.clipboard?.writeText(t); triggerToast(msg); };
+      const handleCreateClient = async (e) => {
+        e.preventDefault();
+        if (!newName.trim()) return triggerToast('Please enter the client’s name.');
+        try {
+          const r = await adminApi({ action: 'create', alias: newName.trim(), bio: newBio.trim(), code: genCode, password: genPass });
+          setCredInfo({ alias: newName.trim(), code: r.code, password: r.password });
+          triggerToast(`Created client ${newName.trim()} (${r.code})`);
+          setNewName(''); setNewBio(''); genCreds(); loadClients();
+        } catch (x) { triggerToast(x.message); }
+      };
+      const handleToggleUserStatus = async (u) => {
+        const next = u.status === 'active' ? 'paused' : 'active';
+        try { await adminApi({ action: 'status', id: u.id, status: next }); triggerToast(`${u.alias} is now ${next === 'paused' ? 'Temporarily Stopped' : 'Active'}`); loadClients(); }
+        catch (x) { triggerToast(x.message); }
+      };
+      const handleDeleteUser = async (u) => {
+        if (!confirm(`Permanently delete ${u.alias}?`)) return;
+        try { await adminApi({ action: 'delete', id: u.id }); triggerToast(`Deleted client ${u.alias}`); loadClients(); }
+        catch (x) { triggerToast(x.message); }
+      };
+      const handleResetPassword = async (u) => {
+        if (!confirm(`Create a new password for ${u.alias}?`)) return;
+        try { const r = await adminApi({ action: 'reset', id: u.id }); setCredInfo({ alias: u.alias, code: u.whisper_code, password: r.password }); triggerToast('New password created.'); }
+        catch (x) { triggerToast(x.message); }
+      };
 
       const handleLogin = async (e) => {
         e.preventDefault(); setLoginError('');
@@ -246,6 +312,133 @@
         .sort((a, b) => b.last.ts - a.last.ts);
       const shownContacts = contacts.filter((c) => c.alias.toLowerCase().includes(searchQuery.toLowerCase()));
 
+      const SETUP_SQL = `CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  whisper_code TEXT UNIQUE NOT NULL,
+  alias TEXT NOT NULL,
+  bio TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'client',
+  status TEXT NOT NULL DEFAULT 'active',
+  public_key JSONB
+);`;
+      const tabBtn = (k, Icon, label) => (
+        <button onClick={() => setAdminSubTab(k)} className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition ${adminSubTab === k ? 'bg-white text-black' : 'bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800'}`}>
+          <Icon className="w-4 h-4" /><span>{label}</span>
+        </button>
+      );
+      const adminView = (
+        <div className="flex-1 overflow-y-auto bg-black p-4 sm:p-8 min-h-0">
+          <div className="max-w-6xl mx-auto space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-900 pb-5">
+              <div className="flex items-center gap-3.5">
+                <WhisperLogo className="w-12 h-12" />
+                <div>
+                  <h1 className="text-xl font-bold text-white">Whisper Admin Dashboard</h1>
+                  <p className="text-xs text-zinc-400">Manage client Whisper-Codes or review your Zero-Chat-Storage setup.</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {tabBtn('clients', Users, `1. Manage Clients (${clients.length})`)}
+                {tabBtn('deploy', Globe, '2. Database & Domain Setup')}
+              </div>
+            </div>
+
+            {adminSubTab === 'deploy' ? (
+              <div className="space-y-6">
+                <div className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="max-w-3xl">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white text-black text-[11px] font-bold uppercase tracking-wider mb-3"><ShieldCheck className="w-3.5 h-3.5" /><span>Zero-Cloud Chat Architecture</span></div>
+                      <h2 className="text-lg font-bold text-white">How Whisper Stores 0% of Client Chats Online</h2>
+                      <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">The cloud only holds accounts and short-lived encrypted packets that are deleted once delivered. Chats, keys and history stay on each device.</p>
+                    </div>
+                    <div className="bg-black border border-zinc-800 rounded-2xl px-4 py-3 text-right">
+                      <div className="text-[10px] font-mono text-zinc-400 uppercase">Current Device Storage</div>
+                      <div className="text-sm font-bold text-white flex items-center gap-1.5 justify-end mt-0.5"><HardDrive className="w-4 h-4" /><span>Local Vault Active</span></div>
+                      <div className="text-[11px] text-zinc-500 mt-0.5">{msgs.length} messages saved ONLY on this device</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl p-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2"><Database className="w-4 h-4" /><span>Step 1: Accounts Database</span></h3>
+                      <button type="button" onClick={() => copyText(SETUP_SQL, 'Copied Schema!')} className="px-3 py-1.5 rounded-xl bg-white text-black font-bold text-xs flex items-center gap-1.5 cursor-pointer"><Copy className="w-3.5 h-3.5" /><span>Copy SQL</span></button>
+                    </div>
+                    <pre className="p-4 rounded-2xl bg-black border border-zinc-800 text-[11px] font-mono text-zinc-200 overflow-x-auto leading-relaxed">{SETUP_SQL}</pre>
+                    <p className="text-[11px] text-zinc-500 mt-3">Connected project: {SB_URL.replace('https://', '')}</p>
+                  </div>
+                  <div className="bg-[#0a0a0a] border border-zinc-800 rounded-3xl p-6 space-y-4">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2"><Globe className="w-4 h-4" /><span>Step 2: Host on Custom Domain</span></h3>
+                    <div>
+                      <label className="block text-xs text-zinc-400 mb-1.5">Enter Your Custom Domain:</label>
+                      <input type="text" value={domainInput} onChange={(e) => setDomainInput(e.target.value)} className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl px-3.5 py-2.5 text-sm font-mono text-white focus:outline-none" />
+                    </div>
+                    <p className="text-[11px] text-zinc-500">Currently served from {location.host}</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2"><UserPlus className="w-4 h-4" /><span>Create New Client</span></h2>
+                    <button type="button" onClick={genCreds} className="text-xs text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer"><RefreshCw className="w-3.5 h-3.5" /> New Code</button>
+                  </div>
+                  <form onSubmit={handleCreateClient} className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-black border border-zinc-800 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-zinc-400">Client Whisper-Code:</span>
+                        <button type="button" onClick={() => copyText(`Whisper-Code: ${genCode} | Password: ${genPass}`, 'Copied credentials!')} className="text-xs font-semibold text-white hover:underline flex items-center gap-1 cursor-pointer"><Copy className="w-3 h-3" /> Copy</button>
+                      </div>
+                      <div className="text-lg font-mono font-bold text-white tracking-wider">{genCode}</div>
+                      <div className="pt-2 border-t border-zinc-900 flex items-center justify-between text-xs"><span className="text-zinc-400">Initial Password:</span><span className="font-mono font-bold text-white bg-zinc-900 px-2.5 py-1 rounded-lg">{genPass}</span></div>
+                    </div>
+                    <div><label className="block text-xs text-zinc-300 mb-1.5">Client Full Name *</label><input type="text" required value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Sarah Jenkins" className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none" /></div>
+                    <div><label className="block text-xs text-zinc-300 mb-1.5">Client Bio / Note</label><input type="text" value={newBio} onChange={(e) => setNewBio(e.target.value)} placeholder="e.g. Private VIP Client" className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none" /></div>
+                    <button type="submit" className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer">+ Create Client</button>
+                  </form>
+                </div>
+
+                <div className="lg:col-span-2 bg-[#0a0a0a] border border-zinc-800 rounded-2xl p-6">
+                  <h2 className="text-sm font-bold text-white mb-1">All Client Accounts ({clients.length})</h2>
+                  {credInfo && (
+                    <div className="mt-3 p-4 rounded-2xl bg-black border border-white/30 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-zinc-300">Login for <b className="text-white">{credInfo.alias}</b> (shown once)</span>
+                        <button onClick={() => setCredInfo(null)} className="text-zinc-500 hover:text-white cursor-pointer">Close</button>
+                      </div>
+                      <div className="font-mono text-white mt-2 break-all">{credInfo.code} • {credInfo.password}</div>
+                      <button onClick={() => copyText(`Whisper-Code: ${credInfo.code} | Password: ${credInfo.password}`, 'Copied credentials!')} className="mt-3 px-3 py-1.5 rounded-xl bg-white text-black font-bold text-xs flex items-center gap-1.5 cursor-pointer"><Copy className="w-3.5 h-3.5" /><span>Copy login</span></button>
+                    </div>
+                  )}
+                  <div className="space-y-3 mt-4">
+                    {clients.map((u) => (
+                      <div key={u.id} className="p-4 rounded-2xl bg-black border border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-11 h-11 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{u.alias.charAt(0)}</div>
+                          <div>
+                            <div className="flex items-center gap-2"><span className="font-bold text-sm text-white">{u.alias}</span>{u.status === 'active' ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white">Active</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400">Paused</span>}</div>
+                            <div className="text-xs font-mono text-zinc-400 mt-0.5">Code: <span className="text-white">{u.whisper_code}</span></div>
+                          </div>
+                        </div>
+                        {u.role !== 'admin' ? (
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => handleResetPassword(u)} title="New password" className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 cursor-pointer"><KeyRound className="w-4 h-4" /></button>
+                            <button onClick={() => handleToggleUserStatus(u)} title={u.status === 'active' ? 'Pause' : 'Resume'} className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs flex items-center gap-1 cursor-pointer border border-zinc-800">{u.status === 'active' ? <PauseCircle className="w-3.5 h-3.5" /> : <PlayCircle className="w-3.5 h-3.5" />}</button>
+                            <button onClick={() => handleDeleteUser(u)} title="Delete" className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                          </div>
+                        ) : <span className="text-xs font-mono text-zinc-500">Admin Owner</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+
       return (
         <div className="h-full w-full bg-black text-white flex flex-col md:flex-row overflow-hidden font-sans select-none">
           {toastMessage && (
@@ -263,11 +456,7 @@
               {navBtn('chats', MessageSquare, 'Chats')}
               {navBtn('contacts', Users, 'Clients')}
               {navBtn('account', Settings, 'Account')}
-              {me.role === 'admin' && (
-                <button onClick={() => { location.href = '/classic.html#admin'; }} className="flex flex-col items-center gap-1 p-2.5 rounded-2xl transition cursor-pointer w-16 text-zinc-400 hover:text-white hover:bg-zinc-900">
-                  <Sliders className="w-5 h-5" /><span className="text-[10px]">Admin</span>
-                </button>
-              )}
+              {me.role === 'admin' && navBtn('admin', Sliders, 'Admin')}
             </div>
             <div className="hidden md:flex flex-col items-center gap-2">
               <button onClick={signOut} title="Sign Out" className="p-3 rounded-2xl text-zinc-400 hover:text-white hover:bg-zinc-900 transition cursor-pointer"><LogOut className="w-5 h-5" /></button>
@@ -275,6 +464,7 @@
           </nav>
 
           <div className="order-1 md:order-2 flex-1 flex overflow-hidden min-h-0">
+            {activeTab === 'admin' && me.role === 'admin' ? adminView : (<>
             <aside className={`${mobileShowChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 shrink-0 bg-[#080808] border-r border-zinc-900 flex-col min-h-0`}>
               <div className="p-4 border-b border-zinc-900">
                 <div className="flex items-center justify-between mb-3">
@@ -409,6 +599,7 @@
                 <div className="flex-1 flex flex-col items-center justify-center text-center p-6"><WhisperLogo className="w-20 h-20 mb-4 opacity-80" /><p className="text-xs text-zinc-500">Select a chat to start messaging.</p></div>
               )}
             </main>
+            </>)}
           </div>
 
           {showAdd && (
