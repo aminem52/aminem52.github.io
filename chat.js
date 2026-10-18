@@ -1,7 +1,7 @@
 window.WhisperChat = (function () {
-  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false, subs: [], timers: {} };
+  const S = { tab: 'chats', open: null, contacts: [], msgs: [], cache: {}, shown: false, subs: [], timers: {}, blocked: [] };
   const enc = new TextEncoder(), dec = new TextDecoder();
-  const b64 = u => btoa(String.fromCharCode(...new Uint8Array(u)));
+  const b64 = u => { const a = new Uint8Array(u); let t = ''; for (let i = 0; i < a.length; i += 8192) t += String.fromCharCode.apply(null, a.subarray(i, i + 8192)); return btoa(t); };
   const ub = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const q = s => S.el.querySelector(s);
@@ -13,7 +13,7 @@ window.WhisperChat = (function () {
     get: k => dbp.then(db => new Promise(ok => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); })),
     set: (k, v) => dbp.then(db => new Promise(ok => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = ok; t.onerror = ok; })),
   };
-  const save = () => Promise.all([kv.set(S.me.id + ':contacts', S.contacts), kv.set(S.me.id + ':msgs', S.msgs), kv.set(S.me.id + ':timers', S.timers)]);
+  const save = () => Promise.all([kv.set(S.me.id + ':contacts', S.contacts), kv.set(S.me.id + ':msgs', S.msgs), kv.set(S.me.id + ':timers', S.timers), kv.set(S.me.id + ':blocked', S.blocked)]);
 
   // Identity key: private key is generated on this device and can never be exported
   async function ensureKeys() {
@@ -61,10 +61,10 @@ window.WhisperChat = (function () {
   async function send(peer, text, opts = {}) {
     const k = await shared(peer.id);
     const ts = Date.now();
-    const m = { id: uid(), peer: peer.id, mine: true, t: text, ts, st: 's', rp: opts.rp, exp: opts.ex ? ts + opts.ex : undefined };
+    const m = { id: uid(), peer: peer.id, mine: true, t: text, ts, st: 's', rp: opts.rp, fw: opts.fw, exp: opts.ex ? ts + opts.ex : undefined };
     const { error } = await S.sb.from('relay_messages').insert({
       sender_id: S.me.id, recipient_id: peer.id, conv_id: [S.me.id, peer.id].sort().join('_'),
-      ciphertext: await seal(k, { id: m.id, t: text, ts, rp: opts.rp, ex: opts.ex }),
+      ciphertext: await seal(k, { id: m.id, t: text, ts, rp: opts.rp, ex: opts.ex, fw: opts.fw }),
     });
     if (error) throw new Error('Could not send. Check your connection.');
     S.msgs.push(m); await save(); render();
@@ -80,6 +80,7 @@ window.WhisperChat = (function () {
   }
   const receipt = (peerId, ids, st) => evt(peerId, { k: 'r', ids, s: st });
   async function ingest(row) {
+    if (S.blocked.includes(row.sender_id)) { await S.sb.from('relay_messages').delete().eq('id', row.id); return; }
     try {
       const o = await unseal(await shared(row.sender_id), row.ciphertext);
       if (o.k === 'r') {
@@ -91,7 +92,7 @@ window.WhisperChat = (function () {
       } else if (o.k === 't') {
         S.timers[row.sender_id] = o.ms || 0;
       } else {
-        if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true, rp: o.rp, exp: o.ex ? Date.now() + o.ex : undefined });
+        if (!S.msgs.some(x => x.id === o.id)) S.msgs.push({ id: o.id, peer: row.sender_id, mine: false, t: o.t, ts: o.ts, unread: true, rp: o.rp, fw: o.fw, exp: o.ex ? Date.now() + o.ex : undefined });
         await ensureContact(row.sender_id);
         receipt(row.sender_id, [o.id], 'd');
       }
@@ -177,6 +178,7 @@ window.WhisperChat = (function () {
       S.contacts = (await kv.get(me.id + ':contacts')) || [];
       S.msgs = (await kv.get(me.id + ':msgs')) || [];
       S.timers = (await kv.get(me.id + ':timers')) || {};
+      S.blocked = (await kv.get(me.id + ':blocked')) || [];
       if (me.role === 'admin') {
         const { data } = await sb.from('profiles').select('id,whisper_code,alias,bio').neq('id', me.id);
         (data || []).forEach(addC);
@@ -198,13 +200,50 @@ window.WhisperChat = (function () {
       if (S.vis) document.removeEventListener('visibilitychange', S.vis);
       if (S.sb) S.sb.removeAllChannels();
     },
-    getState() { return { contacts: S.contacts, msgs: S.msgs, timers: S.timers }; },
+    getState() { return { contacts: S.contacts, msgs: S.msgs, timers: S.timers, blocked: S.blocked }; },
     subscribe(f) { S.subs.push(f); return () => { S.subs = S.subs.filter(x => x !== f); }; },
-    async sendTo(id, text, opts) { const p = S.contacts.find(c => c.id === id); if (!p) throw new Error('Unknown client.'); await send(p, text, opts); },
+    async sendTo(id, text, opts) { const p = S.contacts.find(c => c.id === id); if (!p) throw new Error('Unknown client.'); if (S.blocked.includes(id)) throw new Error('Unblock this client to send messages.'); await send(p, text, opts); },
     react(peerId, msgId, emoji) {
       const m = S.msgs.find(x => x.id === msgId); if (!m) return;
       m.rx = { ...(m.rx || {}) }; if (emoji) m.rx.me = emoji; else delete m.rx.me;
       save(); render(); evt(peerId, { k: 'x', id: msgId, e: emoji || '' });
+    },
+    toggleBlock(id) {
+      const was = S.blocked.includes(id);
+      S.blocked = was ? S.blocked.filter(x => x !== id) : [...S.blocked, id];
+      save(); render(); return !was;
+    },
+    deleteChat(id) { S.msgs = S.msgs.filter(m => m.peer !== id); save(); render(); },
+    wipe() { S.msgs = []; save(); render(); },
+    async safety(peerId) {
+      const { data } = await S.sb.rpc('get_profiles', { p_ids: [peerId] });
+      const p = data && data[0]; if (!p || !p.public_key) return '';
+      const a = S.keys.pub, b = p.public_key;
+      const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode([a.x + a.y, b.x + b.y].sort().join('|'))));
+      return Array.from(h.slice(0, 10), x => String(x).padStart(3, '0')).join('').match(/.{1,5}/g).join(' ');
+    },
+    async exportBackup(pass) {
+      const data = JSON.stringify({ v: 1, contacts: S.contacts, msgs: S.msgs, timers: S.timers, blocked: S.blocked });
+      const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+      const km = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+      const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(data));
+      return JSON.stringify({ app: 'whisper-backup', v: 1, salt: b64(salt), iv: b64(iv), data: b64(ct) });
+    },
+    async importBackup(text, pass) {
+      let d;
+      try {
+        const f = JSON.parse(text);
+        const km = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+        const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: ub(f.salt), iterations: 150000, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+        d = JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub(f.iv) }, key, ub(f.data))));
+      } catch (e) { throw new Error('Wrong password or invalid backup file.'); }
+      let n = 0;
+      (d.msgs || []).forEach(m => { if (!S.msgs.some(x => x.id === m.id)) { S.msgs.push(m); n++; } });
+      (d.contacts || []).forEach(addC);
+      Object.assign(S.timers, d.timers || {});
+      S.blocked = Array.from(new Set([...S.blocked, ...(d.blocked || [])]));
+      await save(); render(); return n;
     },
     deleteMsg(msgId) { S.msgs = S.msgs.filter(m => m.id !== msgId); save(); render(); },
     setTimer(peerId, ms) { S.timers[peerId] = ms; save(); render(); evt(peerId, { k: 't', ms }); },

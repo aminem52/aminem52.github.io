@@ -55,6 +55,7 @@
     const Sliders = mkIcon('<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/>');
     const MessageSquare = mkIcon('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>');
     const MessageSquarePlus = mkIcon('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v6"/><path d="M9 10h6"/>');
+    const Ban = mkIcon('<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>');
     const UserPlus2 = mkIcon('<path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><path d="M19 16v6"/><path d="M22 19h-6"/>');
     const Clock = mkIcon('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>');
     const Smile = mkIcon('<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>');
@@ -94,7 +95,6 @@
       </svg>
     );
 
-    const QUICK_EMOJIS = ['👍', '❤️', '🔒', '🔥', '👏', '😂', '🙏', '✨'];
     const Ticks = ({ st, light }) => st === 'r'
       ? <CheckCheck className={`w-3.5 h-3.5 shrink-0 ${light ? 'text-white' : 'text-black'}`} />
       : st === 'd' ? <CheckCheck className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
@@ -129,12 +129,16 @@
       const [domainInput, setDomainInput] = useState('chat.yourprivatebrand.com');
       const [credInfo, setCredInfo] = useState(null);
       const [selMsg, setSelMsg] = useState(null);
+      const [showInfo, setShowInfo] = useState(false);
+      const [safety, setSafety] = useState('');
+      const [fwdMsg, setFwdMsg] = useState(null);
+      const [backupPass, setBackupPass] = useState('');
+      const restoreRef = useRef(null);
       const [replyTo, setReplyTo] = useState(null);
-      const [showEmoji, setShowEmoji] = useState(false);
       const endRef = useRef(null);
 
       const triggerToast = (msg) => { setToastMessage(msg); setTimeout(() => setToastMessage((p) => (p === msg ? null : p)), 3500); };
-      const { contacts, msgs, timers } = WhisperChat.getState();
+      const { contacts, msgs, timers, blocked } = WhisperChat.getState();
 
       const enter = async () => {
         const { data: { session } } = await sb.auth.getSession();
@@ -227,7 +231,7 @@
         setLoginCode(''); setLoginPassword(''); setActiveTab('chats'); enter();
       };
       const signOut = async () => { WhisperChat.stop(); await sb.auth.signOut(); setMe(null); setOpenId(null); setPhase('login'); };
-      const openChat = (id) => { setReplyTo(null); setSelMsg(null); setShowEmoji(false); setOpenId(id); setActiveTab('chats'); setMobileShowChat(true); WhisperChat.markRead(id); };
+      const openChat = (id) => { setReplyTo(null); setSelMsg(null); setOpenId(id); setActiveTab('chats'); setMobileShowChat(true); WhisperChat.markRead(id); };
       const goTab = (t) => { setActiveTab(t); setMobileShowChat(false); setAccountSubView('main'); };
 
       const cycleTimer = () => {
@@ -236,11 +240,48 @@
         WhisperChat.setTimer(openId, nx);
         triggerToast('Disappearing messages: ' + (nx === 0 ? 'Off' : nx === 15000 ? '15 Seconds' : nx === 60000 ? '1 Minute' : '1 Hour'));
       };
+      useEffect(() => { if (showInfo && openId) { setSafety(''); WhisperChat.safety(openId).then(setSafety); } }, [showInfo, openId]);
+      const handleToggleBlock = (c) => {
+        const nowBlocked = WhisperChat.toggleBlock(c.id);
+        setShowInfo(false);
+        if (nowBlocked) { setOpenId(null); setMobileShowChat(false); }
+        triggerToast(nowBlocked ? 'Client blocked. Their messages are ignored.' : 'Client unblocked.');
+      };
+      const handleDeleteChat = (c) => {
+        if (!confirm(`Delete the whole chat with ${c.alias} from this phone?`)) return;
+        WhisperChat.deleteChat(c.id); setShowInfo(false); setOpenId(null); setMobileShowChat(false); triggerToast('Chat conversation deleted.');
+      };
+      const doForward = async (c) => {
+        const m = fwdMsg; setFwdMsg(null);
+        try { await WhisperChat.sendTo(c.id, m.t, { fw: true, ex: timers[c.id] || 0 }); triggerToast(`Message forwarded to ${c.alias}`); }
+        catch (x) { triggerToast(x.message || 'Could not forward.'); }
+      };
+      const handleExport = async () => {
+        if (backupPass.length < 6) return triggerToast('Choose a backup password of at least 6 characters.');
+        try {
+          const txt = await WhisperChat.exportBackup(backupPass);
+          const file = new File([txt], `whisper-backup-${new Date().toISOString().slice(0, 10)}.json`, { type: 'application/json' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
+          else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); }
+          triggerToast('Encrypted backup created.');
+        } catch (x) { if (x.name !== 'AbortError') triggerToast('Could not create the backup.'); }
+      };
+      const handleRestore = async (e) => {
+        const f = e.target.files && e.target.files[0]; e.target.value = '';
+        if (!f) return;
+        if (!backupPass) return triggerToast('Type the backup password first.');
+        try { const n = await WhisperChat.importBackup(await f.text(), backupPass); triggerToast(`Restored ${n} messages.`); }
+        catch (x) { triggerToast(x.message); }
+      };
+      const handleWipe = () => {
+        if (!confirm('Delete ALL chat history from this phone? This cannot be undone.')) return;
+        WhisperChat.wipe(); setOpenId(null); setMobileShowChat(false); triggerToast('All local chat history wiped.');
+      };
       const handleSend = async (e) => {
         e.preventDefault();
         const v = inputText.trim(); if (!v || !openId) return;
         setInputText('');
-        try { await WhisperChat.sendTo(openId, v, { rp: replyTo ? { a: replyTo.mine ? me.alias : activeContact.alias, t: replyTo.t.slice(0, 80) } : undefined, ex: timers[openId] || 0 }); setReplyTo(null); setShowEmoji(false); } catch (x) { setInputText(v); triggerToast(x.message || 'Could not send.'); }
+        try { await WhisperChat.sendTo(openId, v, { rp: replyTo ? { a: replyTo.mine ? me.alias : activeContact.alias, t: replyTo.t.slice(0, 80) } : undefined, ex: timers[openId] || 0 }); setReplyTo(null); } catch (x) { setInputText(v); triggerToast(x.message || 'Could not send.'); }
       };
       const handleAdd = async (e) => {
         e.preventDefault();
@@ -322,7 +363,7 @@
       );
       const convs = contacts
         .map((c) => ({ c, last: msgs.filter((m) => m.peer === c.id).sort((a, b) => a.ts - b.ts).pop(), unread: msgs.filter((m) => m.peer === c.id && m.unread).length }))
-        .filter((x) => x.last && x.c.alias.toLowerCase().includes(searchQuery.toLowerCase()))
+        .filter((x) => x.last && !blocked.includes(x.c.id) && x.c.alias.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => b.last.ts - a.last.ts);
       const shownContacts = contacts.filter((c) => c.alias.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -547,6 +588,14 @@
                         <div className="flex items-center gap-3"><Settings className="w-5 h-5 text-white" /><div className="text-left"><div className="text-sm font-bold text-white">Edit Account & Password</div><div className="text-[11px] text-zinc-400">Change name, bio, or account password</div></div></div>
                         <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition" />
                       </button>
+                      <button onClick={() => setAccountSubView('blocked')} className="w-full p-4 rounded-2xl bg-black hover:bg-zinc-900 border border-zinc-800 flex items-center justify-between transition cursor-pointer group">
+                        <div className="flex items-center gap-3"><Ban className="w-5 h-5 text-white" /><div className="text-left"><div className="text-sm font-bold text-white">Blocked Clients List</div><div className="text-[11px] text-zinc-400">{blocked.length} clients blocked</div></div></div>
+                        <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition" />
+                      </button>
+                      <button onClick={() => setAccountSubView('vault')} className="w-full p-4 rounded-2xl bg-black hover:bg-zinc-900 border border-zinc-800 flex items-center justify-between transition cursor-pointer group">
+                        <div className="flex items-center gap-3"><HardDrive className="w-5 h-5 text-white" /><div className="text-left"><div className="text-sm font-bold text-white">Local Device Vault</div><div className="text-[11px] text-zinc-400">Manage zero-cloud chat storage backup</div></div></div>
+                        <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition" />
+                      </button>
                       <button onClick={signOut} className="w-full mt-4 py-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-white font-semibold text-xs flex items-center justify-center gap-2 border border-zinc-800 cursor-pointer"><LogOut className="w-4 h-4" /><span>Sign Out</span></button>
                     </div>
                   )}
@@ -567,6 +616,39 @@
                       </form>
                     </div>
                   )}
+                  {accountSubView === 'blocked' && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
+                        <button onClick={() => setAccountSubView('main')} className="p-1.5 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
+                        <h3 className="text-sm font-bold text-white">Blocked Clients List</h3>
+                      </div>
+                      {blocked.length === 0 ? <div className="text-xs text-zinc-500 py-6 text-center">No blocked clients.</div> : (
+                        <div className="space-y-2">
+                          {blocked.map((id) => { const u = contacts.find((c) => c.id === id); return (
+                            <div key={id} className="p-3 rounded-xl bg-black border border-zinc-800 flex items-center justify-between text-xs">
+                              <div><span className="font-bold text-white">{u ? u.alias : 'Unknown client'}</span><span className="text-[10px] text-zinc-400 block font-mono">{u ? u.whisper_code : id}</span></div>
+                              <button onClick={() => { WhisperChat.toggleBlock(id); triggerToast('Client unblocked.'); }} className="px-3 py-1.5 rounded-lg bg-white text-black font-semibold text-[11px] cursor-pointer">Unblock</button>
+                            </div>); })}
+                        </div>)}
+                    </div>
+                  )}
+                  {accountSubView === 'vault' && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
+                        <button onClick={() => setAccountSubView('main')} className="p-1.5 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
+                        <h3 className="text-sm font-bold text-white">Local Device Vault</h3>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-black border border-zinc-800 text-xs text-zinc-300">{msgs.length} messages and {contacts.length} clients are saved only on this phone.</div>
+                      <div className="space-y-2">
+                        <label className="block text-xs text-zinc-400">Backup password</label>
+                        <input type="password" autoComplete="new-password" value={backupPass} onChange={(e) => setBackupPass(e.target.value)} className="w-full bg-[#090909] border border-zinc-800 focus:border-white rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none" />
+                        <button onClick={handleExport} className="w-full py-3 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs cursor-pointer">Export encrypted backup (.json)</button>
+                        <button onClick={() => restoreRef.current && restoreRef.current.click()} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-semibold text-xs cursor-pointer">Restore from backup</button>
+                        <input type="file" accept=".json,application/json" ref={restoreRef} onChange={handleRestore} className="hidden" />
+                      </div>
+                      <button onClick={handleWipe} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-red-400 font-semibold text-xs cursor-pointer">Wipe all chat history from this phone</button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -584,22 +666,23 @@
                 <>
                   <div className="h-16 px-4 border-b border-zinc-900 bg-[#070707] flex items-center gap-3 z-10 shrink-0">
                     <button onClick={() => { setMobileShowChat(false); setOpenId(null); }} className="md:hidden p-2 rounded-xl bg-zinc-900 text-white"><ChevronLeft className="w-4 h-4" /></button>
-                    <div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{activeContact.alias.charAt(0)}</div>
+                    <div onClick={() => setShowInfo(true)} className="flex items-center gap-3 min-w-0 cursor-pointer"><div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{activeContact.alias.charAt(0)}</div>
                     <div className="min-w-0">
                       <div className="text-sm font-bold text-white truncate flex items-center gap-2"><span>{activeContact.alias}</span><Lock className="w-3.5 h-3.5 text-zinc-300 shrink-0" /></div>
                       <div className="text-[11px] text-zinc-400 truncate">End-to-end encrypted • {activeContact.whisper_code}</div>
-                    </div>
+                    </div></div>
                     <button onClick={cycleTimer} title="Disappearing Messages" className={`ml-auto px-2.5 py-2 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 ${(timers[openId] || 0) > 0 ? 'bg-white text-black font-bold border-white' : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white'}`}><Clock className="w-4 h-4" />{(timers[openId] || 0) > 0 && <span>{timers[openId] >= 3600000 ? '1h' : timers[openId] >= 60000 ? '1m' : '15s'}</span>}</button>
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 min-h-0">
                     <div className="flex justify-center mb-4">
-                      <div className="max-w-md text-center px-4 py-2 rounded-2xl bg-[#0b0b0b] border border-zinc-800 text-[11px] text-zinc-400 flex items-center gap-2"><Lock className="w-3.5 h-3.5 text-white shrink-0" /><span>Messages are end-to-end encrypted. Only you and {activeContact.alias} can read them.</span></div>
+                      <div onClick={() => setShowInfo(true)} className="max-w-md text-center px-4 py-2 rounded-2xl bg-[#0b0b0b] border border-zinc-800 text-[11px] text-zinc-400 flex items-center gap-2 cursor-pointer"><Lock className="w-3.5 h-3.5 text-white shrink-0" /><span>Messages are end-to-end encrypted. Only you and {activeContact.alias} can read them. Tap to verify.</span></div>
                     </div>
                     {activeMsgs.map((m) => {
                       const sel = selMsg === m.id, rx = m.rx || {};
                       return (
                         <div key={m.id} className={`flex flex-col ${m.mine ? 'items-end' : 'items-start'}`}>
                           <div onClick={() => setSelMsg(sel ? null : m.id)} className={`max-w-[85%] sm:max-w-lg rounded-2xl px-4 py-2.5 cursor-pointer ${m.mine ? 'bg-white text-black shadow-md' : 'bg-[#121212] text-white border border-zinc-800'}`}>
+                            {m.fw && <div className="text-[10px] opacity-60 mb-1">Forwarded</div>}
                             {m.rp && (
                               <div className={`mb-2 pl-2.5 py-1 border-l-2 rounded text-xs ${m.mine ? 'border-black bg-black/10 text-zinc-800' : 'border-white bg-black/50 text-zinc-300'}`}>
                                 <div className="font-bold text-[10px]">{m.rp.a}</div><div className="truncate">{m.rp.t}</div>
@@ -613,6 +696,7 @@
                             <div className="flex items-center gap-1 mt-1.5 px-2 py-1.5 rounded-2xl bg-zinc-900 border border-zinc-800 text-xs">
                               {['👍', '❤️', '😂', '🙏'].map((e) => <button key={e} onClick={(ev) => { ev.stopPropagation(); WhisperChat.react(openId, m.id, rx.me === e ? '' : e); setSelMsg(null); }} className={`px-1.5 text-base cursor-pointer ${rx.me === e ? 'scale-125' : ''}`}>{e}</button>)}
                               <button onClick={() => { setReplyTo(m); setSelMsg(null); }} className="px-2 py-1 rounded-lg bg-zinc-800 text-white flex items-center gap-1 cursor-pointer"><CornerUpLeft className="w-3 h-3" /><span>Reply</span></button>
+                              <button onClick={() => { setFwdMsg(m); setSelMsg(null); }} className="px-2 py-1 rounded-lg bg-zinc-800 text-white cursor-pointer">Forward</button>
                               <button onClick={() => { WhisperChat.deleteMsg(m.id); setSelMsg(null); triggerToast('Message deleted.'); }} className="px-2 py-1 rounded-lg bg-zinc-800 text-red-400 cursor-pointer">Delete</button>
                             </div>
                           )}
@@ -627,13 +711,7 @@
                       <button onClick={() => setReplyTo(null)} className="p-1 text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
                     </div>
                   )}
-                  {showEmoji && (
-                    <div className="px-3 pt-2 bg-[#070707] border-t border-zinc-900 flex gap-1 overflow-x-auto shrink-0">
-                      {QUICK_EMOJIS.map((e) => <button type="button" key={e} onClick={() => setInputText((t) => t + e)} className="text-2xl px-1.5 cursor-pointer">{e}</button>)}
-                    </div>
-                  )}
                   <form onSubmit={handleSend} className="p-3 bg-[#070707] border-t border-zinc-900 flex items-center gap-2 shrink-0">
-                    <button type="button" onClick={() => setShowEmoji(!showEmoji)} className="p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer shrink-0"><Smile className="w-5 h-5" /></button>
                     <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Encrypted message..." className="flex-1 bg-black border border-zinc-800 focus:border-white rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none" />
                     <button type="submit" className="px-4 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"><Send className="w-4 h-4" /><span className="hidden sm:inline">Send</span></button>
                   </form>
@@ -644,6 +722,42 @@
             </main>
             </>)}
           </div>
+
+          {showInfo && activeContact && (
+            <div className="fixed inset-0 z-50 bg-black/80 flex items-end sm:items-center justify-center p-4" onClick={() => setShowInfo(false)}>
+              <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-[#090909] border border-zinc-800 rounded-3xl p-6 space-y-4 text-center">
+                <div className="w-20 h-20 rounded-full bg-white text-black font-bold text-3xl flex items-center justify-center mx-auto">{activeContact.alias.charAt(0)}</div>
+                <div>
+                  <div className="text-lg font-bold text-white">{activeContact.alias}</div>
+                  <div className="text-xs text-zinc-400 mt-1">{activeContact.bio}</div>
+                  <div className="text-[11px] font-mono text-zinc-500 mt-1">{activeContact.whisper_code}</div>
+                </div>
+                <div className="p-3 rounded-2xl bg-black border border-zinc-800 text-left">
+                  <div className="text-[10px] font-mono text-zinc-400 uppercase mb-1">Safety number</div>
+                  <div className="text-xs font-mono text-white break-words">{safety || 'Loading...'}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1.5">Compare this number with {activeContact.alias}. If it is the same on both phones, nobody is intercepting your chat.</div>
+                </div>
+                <button onClick={() => handleToggleBlock(activeContact)} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer"><Ban className="w-4 h-4" /><span>{blocked.includes(activeContact.id) ? 'Unblock Client' : 'Block Client'}</span></button>
+                <button onClick={() => handleDeleteChat(activeContact)} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-red-400 font-semibold text-xs cursor-pointer">Delete chat from this phone</button>
+                <button onClick={() => setShowInfo(false)} className="w-full py-3 rounded-xl bg-white text-black font-bold text-xs cursor-pointer">Close</button>
+              </div>
+            </div>
+          )}
+
+          {fwdMsg && (
+            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setFwdMsg(null)}>
+              <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-[#090909] border border-zinc-800 rounded-3xl p-5 space-y-3 max-h-[80%] overflow-y-auto">
+                <h3 className="text-base font-bold text-white">Forward to...</h3>
+                {contacts.filter((c) => !blocked.includes(c.id)).map((c) => (
+                  <button key={c.id} onClick={() => doForward(c)} className="w-full p-3 rounded-2xl bg-black border border-zinc-900 hover:border-zinc-700 flex items-center gap-3 text-left cursor-pointer">
+                    <div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{c.alias.charAt(0)}</div>
+                    <span className="text-sm font-bold text-white truncate">{c.alias}</span>
+                  </button>
+                ))}
+                <button onClick={() => setFwdMsg(null)} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-semibold text-xs cursor-pointer">Cancel</button>
+              </div>
+            </div>
+          )}
 
           {showAdd && (
             <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setShowAdd(false)}>
