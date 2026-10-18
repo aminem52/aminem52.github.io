@@ -25,7 +25,8 @@
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: #050505; }
     ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 9999px; }
-    input { font-size: 16px; }
+    input, textarea, select { font-size: 16px !important; }
+    html, body, button, input { touch-action: manipulation; }
   </style>
 </head>
 <body class="bg-black text-white select-none">
@@ -134,10 +135,16 @@
 
       const activeContact = contacts.find((c) => c.id === openId) || null;
       const activeMsgs = msgs.filter((m) => m.peer === openId).sort((a, b) => a.ts - b.ts);
+      const chatVisible = activeTab === 'chats' && !!openId && (mobileShowChat || window.innerWidth >= 768) && !document.hidden;
       useEffect(() => {
         endRef.current?.scrollIntoView({ behavior: 'smooth' });
-        if (openId && activeMsgs.some((m) => m.unread)) WhisperChat.markRead(openId);
-      }, [activeMsgs.length, openId]);
+        if (chatVisible && activeMsgs.some((m) => !m.mine && (m.unread || !m.rs))) WhisperChat.markRead(openId);
+      }, [activeMsgs.length, openId, chatVisible]);
+      useEffect(() => {
+        const f = () => setTick((t) => t + 1);
+        document.addEventListener('visibilitychange', f);
+        return () => document.removeEventListener('visibilitychange', f);
+      }, []);
 
       const handleLogin = async (e) => {
         e.preventDefault(); setLoginError('');
@@ -372,7 +379,7 @@
               {activeTab === 'chats' && activeContact ? (
                 <>
                   <div className="h-16 px-4 border-b border-zinc-900 bg-[#070707] flex items-center gap-3 z-10 shrink-0">
-                    <button onClick={() => setMobileShowChat(false)} className="md:hidden p-2 rounded-xl bg-zinc-900 text-white"><ChevronLeft className="w-4 h-4" /></button>
+                    <button onClick={() => { setMobileShowChat(false); setOpenId(null); }} className="md:hidden p-2 rounded-xl bg-zinc-900 text-white"><ChevronLeft className="w-4 h-4" /></button>
                     <div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{activeContact.alias.charAt(0)}</div>
                     <div className="min-w-0">
                       <div className="text-sm font-bold text-white truncate flex items-center gap-2"><span>{activeContact.alias}</span><Lock className="w-3.5 h-3.5 text-zinc-300 shrink-0" /></div>
