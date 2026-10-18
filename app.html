@@ -134,6 +134,8 @@
       );
     };
 
+    const groupConv = (g) => ({ id: g.id, alias: g.name, isGroup: true, members: g.members, owner: g.owner, whisper_code: g.members.length + ' members' });
+
     function App() {
       const [phase, setPhase] = useState('loading');
       const [me, setMe] = useState(null);
@@ -164,6 +166,9 @@
       const [credInfo, setCredInfo] = useState(null);
       const [selMsg, setSelMsg] = useState(null);
       const [showInfo, setShowInfo] = useState(false);
+      const [showNewGroup, setShowNewGroup] = useState(false);
+      const [groupName, setGroupName] = useState('');
+      const [groupSel, setGroupSel] = useState([]);
       const [safety, setSafety] = useState('');
       const [fwdMsg, setFwdMsg] = useState(null);
       const [backupPass, setBackupPass] = useState('');
@@ -176,7 +181,7 @@
       const endRef = useRef(null);
 
       const triggerToast = (msg) => { setToastMessage(msg); setTimeout(() => setToastMessage((p) => (p === msg ? null : p)), 3500); };
-      const { contacts, msgs, timers, blocked } = WhisperChat.getState();
+      const { contacts, msgs, timers, blocked, groups } = WhisperChat.getState();
 
       const enter = async () => {
         const { data: { session } } = await sb.auth.getSession();
@@ -201,7 +206,8 @@
         return () => clearInterval(iv);
       }, [me]);
 
-      const activeContact = contacts.find((c) => c.id === openId) || null;
+      const allConvs = [...contacts, ...groups.map(groupConv)];
+      const activeContact = allConvs.find((c) => c.id === openId) || null;
       const activeMsgs = msgs.filter((m) => m.peer === openId).sort((a, b) => a.ts - b.ts);
       const chatVisible = activeTab === 'chats' && !!openId && (mobileShowChat || window.innerWidth >= 768) && !document.hidden;
       useEffect(() => {
@@ -278,7 +284,7 @@
         WhisperChat.setTimer(openId, nx);
         triggerToast('Disappearing messages: ' + (nx === 0 ? 'Off' : nx === 15000 ? '15 Seconds' : nx === 60000 ? '1 Minute' : '1 Hour'));
       };
-      useEffect(() => { if (showInfo && openId) { setSafety(''); WhisperChat.safety(openId).then(setSafety); } }, [showInfo, openId]);
+      useEffect(() => { if (showInfo && openId && contacts.some((c) => c.id === openId)) { setSafety(''); WhisperChat.safety(openId).then(setSafety); } }, [showInfo, openId]);
       useEffect(() => {
         if (!recording) return;
         const iv = setInterval(() => { secsRef.current += 1; setRecSecs(secsRef.current); }, 1000);
@@ -313,6 +319,17 @@
         triggerToast('Encrypting and sending...');
         try { await WhisperChat.sendMedia(openId, f, { kind: 'f', name: f.name, mime: f.type || 'application/octet-stream' }, { ex: timers[openId] || 0 }); triggerToast(`Encrypted file "${f.name}" sent.`); }
         catch (x) { triggerToast(x.message || 'Could not send the file.'); }
+      };
+      const handleCreateGroup = async (e) => {
+        e.preventDefault();
+        if (!groupName.trim() || groupSel.length === 0) return triggerToast('Enter a group name and select at least 1 client.');
+        const gid = await WhisperChat.createGroup(groupName.trim(), groupSel);
+        setShowNewGroup(false); setGroupName(''); setGroupSel([]); openChat(gid);
+        triggerToast('Created encrypted group "' + groupName.trim() + '"');
+      };
+      const handleLeaveGroup = (g) => {
+        if (!confirm(`Leave "${g.alias}"? Its messages will be removed from this phone.`)) return;
+        WhisperChat.leaveGroup(g.id); setShowInfo(false); setOpenId(null); setMobileShowChat(false); triggerToast('You left the group.');
       };
       const handleToggleBlock = (c) => {
         const nowBlocked = WhisperChat.toggleBlock(c.id);
@@ -354,7 +371,7 @@
         e.preventDefault();
         const v = inputText.trim(); if (!v || !openId) return;
         setInputText('');
-        try { await WhisperChat.sendTo(openId, v, { rp: replyTo ? { a: replyTo.mine ? me.alias : activeContact.alias, t: replyTo.t.slice(0, 80) } : undefined, ex: timers[openId] || 0 }); setReplyTo(null); } catch (x) { setInputText(v); triggerToast(x.message || 'Could not send.'); }
+        try { await WhisperChat.sendTo(openId, v, { rp: replyTo ? { a: replyTo.mine ? me.alias : (contacts.find((c) => c.id === replyTo.from) || activeContact).alias, t: replyTo.t.slice(0, 80) } : undefined, ex: timers[openId] || 0 }); setReplyTo(null); } catch (x) { setInputText(v); triggerToast(x.message || 'Could not send.'); }
       };
       const handleAdd = async (e) => {
         e.preventDefault();
@@ -434,7 +451,7 @@
           <Icon className="w-5 h-5" /><span className="text-[10px]">{label}</span>
         </button>
       );
-      const convs = contacts
+      const convs = allConvs
         .map((c) => ({ c, last: msgs.filter((m) => m.peer === c.id).sort((a, b) => a.ts - b.ts).pop(), unread: msgs.filter((m) => m.peer === c.id && m.unread).length }))
         .filter((x) => x.last && !blocked.includes(x.c.id) && x.c.alias.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => b.last.ts - a.last.ts);
@@ -601,7 +618,7 @@
                     <h2 className="text-lg font-bold text-white tracking-tight">{activeTab === 'chats' ? 'Chats' : activeTab === 'contacts' ? 'My Clients' : 'Account Settings'}</h2>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {activeTab === 'chats' && <button onClick={() => goTab('contacts')} className="px-2.5 py-1.5 rounded-xl bg-white text-black font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-200 transition cursor-pointer"><MessageSquarePlus className="w-3.5 h-3.5" /><span>New</span></button>}
+                    {activeTab === 'chats' && <><button onClick={() => goTab('contacts')} className="px-2.5 py-1.5 rounded-xl bg-white text-black font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-200 transition cursor-pointer"><MessageSquarePlus className="w-3.5 h-3.5" /><span>New</span></button><button onClick={() => setShowNewGroup(true)} title="Create Encrypted Group" className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white border border-zinc-800 transition cursor-pointer"><Users className="w-4 h-4" /></button></>}
                     {activeTab === 'contacts' && <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded-xl bg-white text-black font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-200 transition cursor-pointer"><UserPlus2 className="w-3.5 h-3.5" /><span>Add by Code</span></button>}
                   </div>
                 </div>
@@ -618,7 +635,7 @@
                   {convs.length === 0 && <div className="p-6 text-xs text-zinc-500 text-center">No chats yet. Open the Clients tab and tap a client to start an encrypted chat.</div>}
                   {convs.map(({ c, last, unread }) => (
                     <button key={c.id} onClick={() => openChat(c.id)} className={`w-full text-left px-4 py-3.5 flex items-center gap-3.5 transition cursor-pointer ${openId === c.id ? 'bg-zinc-900' : 'hover:bg-zinc-950'}`}>
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-base shrink-0 ${openId === c.id ? 'bg-white text-black' : 'bg-zinc-800 text-white border border-zinc-700'}`}>{c.alias.charAt(0)}</div>
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-base shrink-0 ${openId === c.id ? 'bg-white text-black' : 'bg-zinc-800 text-white border border-zinc-700'}`}>{c.isGroup ? <Users className="w-5 h-5" /> : c.alias.charAt(0)}</div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1"><span className="text-sm font-bold text-white truncate">{c.alias}</span><span className="text-[11px] text-zinc-400 shrink-0">{fmt(last.ts)}</span></div>
                         <div className="flex items-center justify-between gap-2 mt-1">
@@ -739,7 +756,7 @@
                 <>
                   <div className="h-16 px-4 border-b border-zinc-900 bg-[#070707] flex items-center gap-3 z-10 shrink-0">
                     <button onClick={() => { setMobileShowChat(false); setOpenId(null); }} className="md:hidden p-2 rounded-xl bg-zinc-900 text-white"><ChevronLeft className="w-4 h-4" /></button>
-                    <div onClick={() => setShowInfo(true)} className="flex items-center gap-3 min-w-0 cursor-pointer"><div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{activeContact.alias.charAt(0)}</div>
+                    <div onClick={() => setShowInfo(true)} className="flex items-center gap-3 min-w-0 cursor-pointer"><div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{activeContact.isGroup ? <Users className="w-5 h-5" /> : activeContact.alias.charAt(0)}</div>
                     <div className="min-w-0">
                       <div className="text-sm font-bold text-white truncate flex items-center gap-2"><span>{activeContact.alias}</span><Lock className="w-3.5 h-3.5 text-zinc-300 shrink-0" /></div>
                       <div className="text-[11px] text-zinc-400 truncate">End-to-end encrypted • {activeContact.whisper_code}</div>
@@ -755,6 +772,7 @@
                       return (
                         <div key={m.id} className={`flex flex-col ${m.mine ? 'items-end' : 'items-start'}`}>
                           <div onClick={() => setSelMsg(sel ? null : m.id)} className={`max-w-[85%] sm:max-w-lg rounded-2xl px-4 py-2.5 cursor-pointer ${m.mine ? 'bg-white text-black shadow-md' : 'bg-[#121212] text-white border border-zinc-800'}`}>
+                            {activeContact.isGroup && !m.mine && <div className="text-[10px] font-bold opacity-70 mb-1">{(contacts.find((c) => c.id === m.from) || {}).alias || 'Member'}</div>}
                             {m.fw && <div className="text-[10px] opacity-60 mb-1">Forwarded</div>}
                             {m.rp && (
                               <div className={`mb-2 pl-2.5 py-1 border-l-2 rounded text-xs ${m.mine ? 'border-black bg-black/10 text-zinc-800' : 'border-white bg-black/50 text-zinc-300'}`}>
@@ -762,9 +780,9 @@
                               </div>
                             )}
                             {m.att ? <MediaBubble m={m} /> : <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{m.t}</p>}
-                            <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[10px] opacity-70">{m.exp && <Clock className="w-2.5 h-2.5" />}<Lock className="w-2.5 h-2.5" /><span>{fmt(m.ts)}</span>{m.mine && <Ticks st={m.st} />}</div>
+                            <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[10px] opacity-70">{m.exp && <Clock className="w-2.5 h-2.5" />}<Lock className="w-2.5 h-2.5" /><span>{fmt(m.ts)}</span>{m.mine && !activeContact.isGroup && <Ticks st={m.st} />}</div>
                           </div>
-                          {(rx.me || rx.them) && <div className="flex gap-1 -mt-2 mx-2 px-1.5 py-0.5 rounded-full bg-zinc-900 border border-zinc-700 text-xs relative z-10">{rx.me && <span>{rx.me}</span>}{rx.them && <span>{rx.them}</span>}</div>}
+                          {Object.keys(rx).length > 0 && <div className="flex gap-1 -mt-2 mx-2 px-1.5 py-0.5 rounded-full bg-zinc-900 border border-zinc-700 text-xs relative z-10">{Object.values(rx).map((e, i) => <span key={i}>{e}</span>)}</div>}
                           {sel && (
                             <div className="flex items-center gap-1 mt-1.5 px-2 py-1.5 rounded-2xl bg-zinc-900 border border-zinc-800 text-xs">
                               {['👍', '❤️', '😂', '🙏'].map((e) => <button key={e} onClick={(ev) => { ev.stopPropagation(); WhisperChat.react(openId, m.id, rx.me === e ? '' : e); setSelMsg(null); }} className={`px-1.5 text-base cursor-pointer ${rx.me === e ? 'scale-125' : ''}`}>{e}</button>)}
@@ -812,12 +830,13 @@
           {showInfo && activeContact && (
             <div className="fixed inset-0 z-50 bg-black/80 flex items-end sm:items-center justify-center p-4" onClick={() => setShowInfo(false)}>
               <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-[#090909] border border-zinc-800 rounded-3xl p-6 space-y-4 text-center">
-                <div className="w-20 h-20 rounded-full bg-white text-black font-bold text-3xl flex items-center justify-center mx-auto">{activeContact.alias.charAt(0)}</div>
+                <div className="w-20 h-20 rounded-full bg-white text-black font-bold text-3xl flex items-center justify-center mx-auto">{activeContact.isGroup ? <Users className="w-9 h-9" /> : activeContact.alias.charAt(0)}</div>
                 <div>
                   <div className="text-lg font-bold text-white">{activeContact.alias}</div>
                   <div className="text-xs text-zinc-400 mt-1">{activeContact.bio}</div>
                   <div className="text-[11px] font-mono text-zinc-500 mt-1">{activeContact.whisper_code}</div>
                 </div>
+                {!activeContact.isGroup && (<>
                 <div className="p-3 rounded-2xl bg-black border border-zinc-800 text-left">
                   <div className="text-[10px] font-mono text-zinc-400 uppercase mb-1">Safety number</div>
                   <div className="text-xs font-mono text-white break-words">{safety || 'Loading...'}</div>
@@ -825,6 +844,20 @@
                 </div>
                 <button onClick={() => handleToggleBlock(activeContact)} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer"><Ban className="w-4 h-4" /><span>{blocked.includes(activeContact.id) ? 'Unblock Client' : 'Block Client'}</span></button>
                 <button onClick={() => handleDeleteChat(activeContact)} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-red-400 font-semibold text-xs cursor-pointer">Delete chat from this phone</button>
+                </>)}
+                {activeContact.isGroup && (<>
+                  <div className="p-3 rounded-2xl bg-black border border-zinc-800 text-left max-h-48 overflow-y-auto">
+                    <div className="text-[10px] font-mono text-zinc-400 uppercase mb-2">{activeContact.members.length} members</div>
+                    {activeContact.members.map((id) => <div key={id} className="text-xs text-white py-1">{id === me.id ? 'You' : (contacts.find((c) => c.id === id) || {}).alias || 'Member'}{id === activeContact.owner && <span className="text-zinc-500"> • admin</span>}</div>)}
+                  </div>
+                  {activeContact.owner === me.id && contacts.filter((c) => !activeContact.members.includes(c.id)).length > 0 && (
+                    <div className="p-3 rounded-2xl bg-black border border-zinc-800 text-left max-h-40 overflow-y-auto">
+                      <div className="text-[10px] font-mono text-zinc-400 uppercase mb-2">Add member</div>
+                      {contacts.filter((c) => !activeContact.members.includes(c.id)).map((c) => <button key={c.id} onClick={() => { WhisperChat.addMembers(activeContact.id, [c.id]); triggerToast(`Added ${c.alias}`); }} className="block w-full text-left text-xs text-white py-1.5 cursor-pointer">+ {c.alias}</button>)}
+                    </div>
+                  )}
+                  <button onClick={() => handleLeaveGroup(activeContact)} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-red-400 font-semibold text-xs cursor-pointer">Leave group</button>
+                </>)}
                 <button onClick={() => setShowInfo(false)} className="w-full py-3 rounded-xl bg-white text-black font-bold text-xs cursor-pointer">Close</button>
               </div>
             </div>
@@ -834,7 +867,7 @@
             <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setFwdMsg(null)}>
               <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-[#090909] border border-zinc-800 rounded-3xl p-5 space-y-3 max-h-[80%] overflow-y-auto">
                 <h3 className="text-base font-bold text-white">Forward to...</h3>
-                {contacts.filter((c) => !blocked.includes(c.id)).map((c) => (
+                {allConvs.filter((c) => !blocked.includes(c.id)).map((c) => (
                   <button key={c.id} onClick={() => doForward(c)} className="w-full p-3 rounded-2xl bg-black border border-zinc-900 hover:border-zinc-700 flex items-center gap-3 text-left cursor-pointer">
                     <div className="w-10 h-10 rounded-full bg-white text-black font-bold text-sm flex items-center justify-center shrink-0">{c.alias.charAt(0)}</div>
                     <span className="text-sm font-bold text-white truncate">{c.alias}</span>
@@ -842,6 +875,29 @@
                 ))}
                 <button onClick={() => setFwdMsg(null)} className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-semibold text-xs cursor-pointer">Cancel</button>
               </div>
+            </div>
+          )}
+
+          {showNewGroup && (
+            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setShowNewGroup(false)}>
+              <form onSubmit={handleCreateGroup} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-[#090909] border border-zinc-800 rounded-3xl p-5 space-y-3 max-h-[85%] overflow-y-auto">
+                <h3 className="text-base font-bold text-white">Create Encrypted Group</h3>
+                <input type="text" value={groupName} onChange={(e) => setGroupName(e.target.value)} maxLength={60} placeholder="Group name" className="w-full bg-black border border-zinc-800 focus:border-white rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none" />
+                <div className="text-[11px] text-zinc-400">Select clients to add:</div>
+                {contacts.filter((c) => !blocked.includes(c.id)).map((c) => {
+                  const on = groupSel.includes(c.id);
+                  return (
+                    <button type="button" key={c.id} onClick={() => setGroupSel(on ? groupSel.filter((x) => x !== c.id) : [...groupSel, c.id])} className={`w-full p-3 rounded-2xl border flex items-center gap-3 text-left cursor-pointer ${on ? 'bg-white text-black border-white' : 'bg-black text-white border-zinc-900'}`}>
+                      <div className={`w-9 h-9 rounded-full font-bold text-sm flex items-center justify-center shrink-0 ${on ? 'bg-black text-white' : 'bg-white text-black'}`}>{c.alias.charAt(0)}</div>
+                      <span className="text-sm font-bold truncate">{c.alias}</span>
+                    </button>
+                  );
+                })}
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowNewGroup(false)} className="flex-1 py-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-semibold text-xs cursor-pointer">Cancel</button>
+                  <button type="submit" className="flex-1 py-3 rounded-xl bg-white text-black font-bold text-xs cursor-pointer">Create Group</button>
+                </div>
+              </form>
             </div>
           )}
 
