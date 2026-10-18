@@ -266,6 +266,8 @@ window.WhisperChat = (function () {
       await send(peer, label, { ...opts, att: base, attFor: tid => ({ ...base, p: paths[tid] }), localBlob: { buf, mime: meta.mime } });
     },
     onCall(fn) { S.onCall = fn; },
+    me() { return S.me.id; },
+    async ensureContacts(ids) { for (const id of ids) if (id !== S.me.id) await ensureContact(id); render(); },
     signal(peerId, obj) { return evt(peerId, { k: 'c', ts: Date.now(), ...obj }); },
     addCall(c) { S.calls.unshift(c); S.calls = S.calls.slice(0, 100); save(); render(); },
     async createGroup(name, ids) {

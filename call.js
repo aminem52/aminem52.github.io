@@ -1,11 +1,12 @@
 window.WhisperCall = (function () {
   const ICE = { iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] };
-  let eng = null, cb = () => {}, pc = null, local = null, remote = null, queued = [], early = {};
-  let timer = null, ringT = null, ringI = null, actx = null, st = { phase: 'idle' };
-  const emit = () => cb({ ...st, local, remote });
-  const set = p => { st = { ...st, ...p }; emit(); };
-  const send = o => eng.signal(st.peerId, { ...o, cid: st.cid });
+  let eng = null, cb = () => {}, local = null, peers = {}, early = {}, timer = null, ringT = null, ringI = null, actx = null;
+  let st = { phase: 'idle' };
   const nm = id => (eng.getState().contacts.find(c => c.id === id) || {}).alias || 'Client';
+  const parts = () => Object.keys(peers).map(id => ({ id, name: nm(id), stream: peers[id].remote, live: peers[id].live }));
+  const emit = () => cb({ ...st, local, parts: parts() });
+  const set = p => { st = { ...st, ...p }; emit(); };
+  const sig = (to, o) => eng.signal(to, { ...o, cid: st.cid });
   const media = (video, facing) => navigator.mediaDevices.getUserMedia({ audio: true, video: video ? { facingMode: facing || 'user' } : false });
 
   function ring(on) {
@@ -24,92 +25,129 @@ window.WhisperCall = (function () {
     beep(); ringI = setInterval(beep, 2000);
   }
 
-  function mkPc() {
-    pc = new RTCPeerConnection(ICE);
-    local.getTracks().forEach(t => pc.addTrack(t, local));
-    pc.onicecandidate = e => { if (e.candidate) send({ t: 'ice', c: e.candidate.toJSON() }); };
-    pc.ontrack = e => { if (e.streams && e.streams[0]) remote = e.streams[0]; emit(); };
-    pc.onconnectionstatechange = () => {
-      if (!pc) return;
-      if (pc.connectionState === 'connected' && st.phase !== 'connected') {
-        ring(false); clearTimeout(ringT);
-        const t0 = Date.now();
-        timer = setInterval(() => set({ dur: Math.floor((Date.now() - t0) / 1000) }), 1000);
-        set({ phase: 'connected', dur: 0 });
+  function mkPeer(id) {
+    const p = (peers[id] = { pc: new RTCPeerConnection(ICE), remote: null, queued: early[st.cid + id] || [], live: false });
+    delete early[st.cid + id];
+    local.getTracks().forEach(t => p.pc.addTrack(t, local));
+    p.pc.onicecandidate = e => { if (e.candidate) sig(id, { t: 'ice', c: e.candidate.toJSON() }); };
+    p.pc.ontrack = e => { if (e.streams && e.streams[0]) p.remote = e.streams[0]; emit(); };
+    p.pc.onconnectionstatechange = () => {
+      const s = p.pc.connectionState;
+      if (s === 'connected' && !p.live) {
+        p.live = true; ring(false);
+        if (st.phase !== 'connected') {
+          const t0 = Date.now(); clearInterval(timer);
+          timer = setInterval(() => set({ dur: Math.floor((Date.now() - t0) / 1000) }), 1000);
+          set({ phase: 'connected', dur: 0 });
+        } else emit();
       }
-      if (pc.connectionState === 'failed') finish('Connection failed');
+      if (s === 'failed') drop(id, 'Connection failed');
     };
+    return p;
   }
-  async function flush() { for (const c of queued.splice(0)) { try { await pc.addIceCandidate(c); } catch (e) { /* ignore */ } } }
+  async function flush(p) { for (const c of p.queued.splice(0)) { try { await p.pc.addIceCandidate(c); } catch (e) { /* ignore */ } } }
+
+  async function offerTo(id, extra) {
+    const p = mkPeer(id);
+    const offer = await p.pc.createOffer(); await p.pc.setLocalDescription(offer);
+    sig(id, { t: 'offer', sdp: offer.sdp, video: st.video, members: st.members, gid: st.gid, title: st.title, ...extra });
+    if (!(extra && extra.join)) setTimeout(() => { if (peers[id] && !peers[id].live) { sig(id, { t: 'leave' }); drop(id, 'No answer'); } }, 45000);
+  }
+  async function answerOffer(from, sdp) {
+    const p = mkPeer(from);
+    await p.pc.setRemoteDescription({ type: 'offer', sdp });
+    await flush(p);
+    const ans = await p.pc.createAnswer(); await p.pc.setLocalDescription(ans);
+    sig(from, { t: 'answer', sdp: ans.sdp });
+  }
 
   function finish(msg, missed) {
     ring(false); clearTimeout(ringT); clearInterval(timer);
     const was = st;
-    if (pc) { try { pc.close(); } catch (e) { /* ignore */ } pc = null; }
+    Object.values(peers).forEach(p => { try { p.pc.close(); } catch (e) { /* ignore */ } });
+    peers = {}; early = {};
     if (local) local.getTracks().forEach(t => t.stop());
-    local = null; remote = null; queued = []; early = {};
-    if (was.phase !== 'idle') eng.addCall({ id: was.cid + was.dir, peerId: was.peerId, name: was.name, type: was.video ? 'video' : 'voice', dir: missed ? 'missed' : was.dir, ts: Date.now(), dur: was.dur || 0 });
+    local = null;
+    if (was.phase !== 'idle') eng.addCall({ id: was.cid + was.dir, peerId: was.from || (was.members || []).find(x => x !== eng.me()) || '', name: was.name, type: was.video ? 'video' : 'voice', dir: missed ? 'missed' : was.dir, ts: Date.now(), dur: was.dur || 0, gid: was.gid, members: was.members });
     st = { phase: 'idle', msg }; emit();
   }
+  function drop(id, why) {
+    const p = peers[id]; if (!p) return;
+    try { p.pc.close(); } catch (e) { /* ignore */ }
+    delete peers[id];
+    if (!Object.keys(peers).length) finish(why || 'Call ended'); else emit();
+  }
 
-  async function start(peerId, video) {
-    if (st.phase !== 'idle') return;
+  async function start(targets, video, opts = {}) {
+    if (st.phase !== 'idle' || !targets.length) return;
     try { local = await media(video); } catch (e) { throw new Error('Camera or microphone access was not allowed.'); }
-    st = { phase: 'calling', peerId, name: nm(peerId), video, cid: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), dir: 'out', muted: false, camOff: false, facing: 'user', dur: 0 };
-    emit(); ring(true); mkPc();
-    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
-    send({ t: 'offer', sdp: offer.sdp, video });
-    ringT = setTimeout(() => { send({ t: 'end' }); finish('No answer'); }, 45000);
+    const title = opts.title || nm(targets[0]);
+    st = { phase: 'calling', cid: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), video, dir: 'out', name: title, title, gid: opts.gid, members: [eng.me(), ...targets], muted: false, camOff: false, facing: 'user', dur: 0 };
+    emit(); ring(true);
+    for (const id of targets) await offerTo(id);
+  }
+  async function invite(ids) {
+    if (st.phase !== 'connected' && st.phase !== 'connecting') return;
+    const add = ids.filter(id => !peers[id]);
+    set({ members: Array.from(new Set([...st.members, ...add])) });
+    for (const id of add) await offerTo(id);
   }
   async function accept() {
     if (st.phase !== 'ringing') return;
     ring(false); clearTimeout(ringT);
-    try { local = await media(st.video); } catch (e) { send({ t: 'decline' }); finish('Camera or microphone access was not allowed.'); return; }
-    mkPc();
-    await pc.setRemoteDescription({ type: 'offer', sdp: st.offer });
-    await flush();
-    const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
-    send({ t: 'answer', sdp: ans.sdp }); set({ phase: 'connecting' });
+    try { local = await media(st.video); } catch (e) { sig(st.from, { t: 'decline' }); finish('Camera or microphone access was not allowed.'); return; }
+    const { from, offer, members } = st;
+    set({ phase: 'connecting' });
+    await answerOffer(from, offer);
+    members.filter(m => m !== eng.me() && m !== from).forEach(m => sig(m, { t: 'join' }));
   }
-  function decline() { send({ t: 'decline' }); finish(''); }
-  function end() { send({ t: 'end' }); finish('Call ended'); }
+  function decline() { sig(st.from, { t: 'decline' }); finish(''); }
+  function end() { Object.keys(peers).forEach(id => sig(id, { t: 'leave' })); finish('Call ended'); }
 
   async function handle(from, o) {
     if (o.t === 'offer') {
+      if (st.phase !== 'idle' && o.join && o.cid === st.cid && local) { await answerOffer(from, o.sdp); return; }
       if (st.phase !== 'idle') { eng.signal(from, { t: 'busy', cid: o.cid }); return; }
-      st = { phase: 'ringing', peerId: from, name: nm(from), video: !!o.video, cid: o.cid, dir: 'in', offer: o.sdp, muted: false, camOff: false, facing: 'user', dur: 0 };
-      queued = early[o.cid] || []; early = {};
+      eng.ensureContacts(o.members || []);
+      st = { phase: 'ringing', cid: o.cid, from, offer: o.sdp, video: !!o.video, dir: 'in', name: o.title || nm(from), title: o.title, gid: o.gid, members: o.members || [from], muted: false, camOff: false, facing: 'user', dur: 0 };
+      early[o.cid + from] = early[o.cid + from] || [];
       emit(); ring(true);
       ringT = setTimeout(() => finish('Missed call', true), 45000);
       return;
     }
-    if (st.phase === 'idle') { if (o.t === 'ice') (early[o.cid] = early[o.cid] || []).push(o.c); return; }
-    if (o.cid !== st.cid || from !== st.peerId) return;
-    if (o.t === 'answer' && pc) {
-      await pc.setRemoteDescription({ type: 'answer', sdp: o.sdp }); await flush();
-      ring(false); clearTimeout(ringT); set({ phase: 'connecting' });
-    } else if (o.t === 'ice') {
-      if (pc && pc.remoteDescription) { try { await pc.addIceCandidate(o.c); } catch (e) { /* ignore */ } } else queued.push(o.c);
-    } else if (o.t === 'end') finish(st.phase === 'ringing' ? 'Missed call' : 'Call ended', st.phase === 'ringing');
-    else if (o.t === 'decline') finish('Call declined');
-    else if (o.t === 'busy') finish('Client is busy on another call');
+    if (st.phase === 'idle' || o.cid !== st.cid) { if (o.t === 'ice') (early[o.cid + from] = early[o.cid + from] || []).push(o.c); return; }
+    const p = peers[from];
+    if (o.t === 'ice') {
+      if (p && p.pc.remoteDescription) { try { await p.pc.addIceCandidate(o.c); } catch (e) { /* ignore */ } }
+      else if (p) p.queued.push(o.c); else (early[o.cid + from] = early[o.cid + from] || []).push(o.c);
+    } else if (o.t === 'answer' && p) {
+      await p.pc.setRemoteDescription({ type: 'answer', sdp: o.sdp }); await flush(p);
+      ring(false); if (st.phase === 'calling') set({ phase: 'connecting' });
+    } else if (o.t === 'join') {
+      if (local && !peers[from]) { set({ members: Array.from(new Set([...st.members, from])) }); sig(from, { t: 'present' }); }
+    } else if (o.t === 'present') {
+      if (local && !peers[from]) await offerTo(from, { join: true });
+    } else if (o.t === 'leave') {
+      if (st.phase === 'ringing' && from === st.from) finish('Missed call', true); else drop(from, 'Call ended');
+    } else if (o.t === 'decline' || o.t === 'busy') {
+      drop(from, o.t === 'busy' ? 'Client is busy on another call' : 'Call declined');
+    }
   }
 
   function toggleMute() { if (!local) return; local.getAudioTracks().forEach(t => { t.enabled = !t.enabled; }); set({ muted: !st.muted }); }
   function toggleCam() { if (!local || !st.video) return; local.getVideoTracks().forEach(t => { t.enabled = !t.enabled; }); set({ camOff: !st.camOff }); }
   async function switchCam() {
-    if (!local || !st.video || !pc) return;
+    if (!local || !st.video) return;
     const f = st.facing === 'user' ? 'environment' : 'user';
     try {
       const nt = (await navigator.mediaDevices.getUserMedia({ video: { facingMode: f } })).getVideoTracks()[0];
-      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) await sender.replaceTrack(nt);
+      for (const p of Object.values(peers)) { const s = p.pc.getSenders().find(x => x.track && x.track.kind === 'video'); if (s) await s.replaceTrack(nt); }
       local.getVideoTracks().forEach(t => { t.stop(); local.removeTrack(t); });
       local.addTrack(nt); set({ facing: f, camOff: false });
     } catch (e) { /* keep current camera */ }
   }
   return {
     init(engine, callback) { eng = engine; cb = callback; eng.onCall((from, o) => handle(from, o)); },
-    start, accept, decline, end, toggleMute, toggleCam, switchCam,
+    start, invite, accept, decline, end, toggleMute, toggleCam, switchCam,
   };
 })();
