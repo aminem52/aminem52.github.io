@@ -1,13 +1,23 @@
 window.WhisperCall = (function () {
   const ICE = { iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] };
-  let eng = null, cb = () => {}, local = null, peers = {}, early = {}, timer = null, ringT = null, ringI = null, actx = null;
+  let eng = null, cb = () => {}, local = null, peers = {}, early = {}, greeted = {}, timer = null, ringT = null, ringI = null, actx = null;
   let st = { phase: 'idle' };
   const nm = id => (eng.getState().contacts.find(c => c.id === id) || {}).alias || 'Client';
   const parts = () => Object.keys(peers).map(id => ({ id, name: nm(id), stream: peers[id].remote, live: peers[id].live }));
   const emit = () => cb({ ...st, local, parts: parts() });
   const set = p => { st = { ...st, ...p }; emit(); };
   const sig = (to, o) => eng.signal(to, { ...o, cid: st.cid });
-  const media = (video, facing) => navigator.mediaDevices.getUserMedia({ audio: true, video: video ? { facingMode: facing || 'user' } : false });
+  const vc = (facing, low) => (low
+    ? { facingMode: facing || 'user', width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 20 } }
+    : { facingMode: facing || 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } });
+  const media = (video, facing, low) => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: video ? vc(facing, low) : false });
+  async function cap() { // limit video bitrate per connection so several streams stay smooth
+    const kbps = (st.members || []).length > 2 ? 220 : 700;
+    for (const p of Object.values(peers)) for (const s of p.pc.getSenders()) {
+      if (!s.track || s.track.kind !== 'video') continue;
+      try { const prm = s.getParameters(); if (!prm.encodings || !prm.encodings.length) prm.encodings = [{}]; prm.encodings[0].maxBitrate = kbps * 1000; await s.setParameters(prm); } catch (e) { /* not supported */ }
+    }
+  }
 
   function ring(on) {
     clearInterval(ringI); ringI = null;
@@ -34,7 +44,7 @@ window.WhisperCall = (function () {
     p.pc.onconnectionstatechange = () => {
       const s = p.pc.connectionState;
       if (s === 'connected' && !p.live) {
-        p.live = true; ring(false);
+        p.live = true; ring(false); cap();
         if (st.phase !== 'connected') {
           const t0 = Date.now(); clearInterval(timer);
           timer = setInterval(() => set({ dur: Math.floor((Date.now() - t0) / 1000) }), 1000);
@@ -65,7 +75,7 @@ window.WhisperCall = (function () {
     ring(false); clearTimeout(ringT); clearInterval(timer);
     const was = st;
     Object.values(peers).forEach(p => { try { p.pc.close(); } catch (e) { /* ignore */ } });
-    peers = {}; early = {};
+    peers = {}; early = {}; greeted = {};
     if (local) local.getTracks().forEach(t => t.stop());
     local = null;
     if (was.phase !== 'idle') eng.addCall({ id: was.cid + was.dir, peerId: was.from || (was.members || []).find(x => x !== eng.me()) || '', name: was.name, type: was.video ? 'video' : 'voice', dir: missed ? 'missed' : was.dir, ts: Date.now(), dur: was.dur || 0, gid: was.gid, members: was.members });
@@ -74,13 +84,14 @@ window.WhisperCall = (function () {
   function drop(id, why) {
     const p = peers[id]; if (!p) return;
     try { p.pc.close(); } catch (e) { /* ignore */ }
-    delete peers[id];
+    delete peers[id]; delete greeted[id];
+    st = { ...st, members: (st.members || []).filter(x => x !== id) };
     if (!Object.keys(peers).length) finish(why || 'Call ended'); else emit();
   }
 
   async function start(targets, video, opts = {}) {
     if (st.phase !== 'idle' || !targets.length) return;
-    try { local = await media(video); } catch (e) { throw new Error('Camera or microphone access was not allowed.'); }
+    try { local = await media(video, null, targets.length > 1); } catch (e) { throw new Error('Camera or microphone access was not allowed.'); }
     const title = opts.title || nm(targets[0]);
     st = { phase: 'calling', cid: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), video, dir: 'out', name: title, title, gid: opts.gid, members: [eng.me(), ...targets], muted: false, camOff: false, facing: 'user', dur: 0 };
     emit(); ring(true);
@@ -95,18 +106,18 @@ window.WhisperCall = (function () {
   async function accept() {
     if (st.phase !== 'ringing') return;
     ring(false); clearTimeout(ringT);
-    try { local = await media(st.video); } catch (e) { sig(st.from, { t: 'decline' }); finish('Camera or microphone access was not allowed.'); return; }
+    try { local = await media(st.video, null, st.members.length > 2); } catch (e) { sig(st.from, { t: 'decline' }); finish('Camera or microphone access was not allowed.'); return; }
     const { from, offer, members } = st;
     set({ phase: 'connecting' });
     await answerOffer(from, offer);
-    members.filter(m => m !== eng.me() && m !== from).forEach(m => sig(m, { t: 'join' }));
+    members.filter(m => m !== eng.me() && m !== from).forEach(m => { greeted[m] = true; sig(m, { t: 'hello' }); });
   }
   function decline() { sig(st.from, { t: 'decline' }); finish(''); }
   function end() { Object.keys(peers).forEach(id => sig(id, { t: 'leave' })); finish('Call ended'); }
 
   async function handle(from, o) {
     if (o.t === 'offer') {
-      if (st.phase !== 'idle' && o.join && o.cid === st.cid && local) { await answerOffer(from, o.sdp); return; }
+      if (st.phase !== 'idle' && o.join && o.cid === st.cid && local) { if (!peers[from]) await answerOffer(from, o.sdp); return; }
       if (st.phase !== 'idle') { eng.signal(from, { t: 'busy', cid: o.cid }); return; }
       eng.ensureContacts(o.members || []);
       st = { phase: 'ringing', cid: o.cid, from, offer: o.sdp, video: !!o.video, dir: 'in', name: o.title || nm(from), title: o.title, gid: o.gid, members: o.members || [from], muted: false, camOff: false, facing: 'user', dur: 0 };
@@ -123,10 +134,11 @@ window.WhisperCall = (function () {
     } else if (o.t === 'answer' && p) {
       await p.pc.setRemoteDescription({ type: 'answer', sdp: o.sdp }); await flush(p);
       ring(false); if (st.phase === 'calling') set({ phase: 'connecting' });
-    } else if (o.t === 'join') {
-      if (local && !peers[from]) { set({ members: Array.from(new Set([...st.members, from])) }); sig(from, { t: 'present' }); }
-    } else if (o.t === 'present') {
-      if (local && !peers[from]) await offerTo(from, { join: true });
+    } else if (o.t === 'hello') {
+      if (!local || peers[from]) return;
+      set({ members: Array.from(new Set([...st.members, from])) });
+      if (!greeted[from]) { greeted[from] = true; sig(from, { t: 'hello' }); }
+      if (eng.me() < from) await offerTo(from, { join: true });
     } else if (o.t === 'leave') {
       if (st.phase === 'ringing' && from === st.from) finish('Missed call', true); else drop(from, 'Call ended');
     } else if (o.t === 'decline' || o.t === 'busy') {
@@ -140,7 +152,7 @@ window.WhisperCall = (function () {
     if (!local || !st.video) return;
     const f = st.facing === 'user' ? 'environment' : 'user';
     try {
-      const nt = (await navigator.mediaDevices.getUserMedia({ video: { facingMode: f } })).getVideoTracks()[0];
+      const nt = (await navigator.mediaDevices.getUserMedia({ video: vc(f, st.members.length > 2) })).getVideoTracks()[0];
       for (const p of Object.values(peers)) { const s = p.pc.getSenders().find(x => x.track && x.track.kind === 'video'); if (s) await s.replaceTrack(nt); }
       local.getVideoTracks().forEach(t => { t.stop(); local.removeTrack(t); });
       local.addTrack(nt); set({ facing: f, camOff: false });
